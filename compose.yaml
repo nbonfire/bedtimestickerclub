@@ -1,0 +1,39 @@
+name: bedtime-preview
+
+services:
+  button-card:
+    image: curlimages/curl:8.8.0
+    user: "0:0"
+    entrypoint: ["sh", "/setup/download-button-card.sh"]
+    volumes:
+      - ./.test-ha/www:/assets
+      - ./docker/download-button-card.sh:/setup/download-button-card.sh:ro
+    restart: "no"
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.10.1
+    depends_on:
+      button-card:
+        condition: service_completed_successfully
+    ports:
+      - "${BEDTIME_BIND_ADDRESS:-127.0.0.1}:${BEDTIME_PORT:-18123}:8123"
+    environment:
+      TZ: "${BEDTIME_TIME_ZONE:-America/New_York}"
+    volumes:
+      - ./.test-ha:/config
+      - ./docker/homeassistant/configuration.yaml:/config/configuration.yaml:ro
+      - ./docker/homeassistant/ui-lovelace.yaml:/config/ui-lovelace.yaml:ro
+      - ./packages:/work/packages:ro
+      - ./dashboards:/work/dashboards:ro
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8123/', timeout=5).close()"
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 30s

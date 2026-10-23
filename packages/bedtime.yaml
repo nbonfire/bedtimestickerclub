@@ -1,0 +1,349 @@
+# Bedtime Sticker Club — Home Assistant 2026.10+
+# Keep these entity IDs stable: they link the dashboard and persisted rewards.
+frontend:
+  themes:
+    Bedtime Sticker Club:
+      ha-view-sections-column-min-width: 290px
+      ha-view-sections-column-gap: 16px
+      ha-view-sections-row-gap: 16px
+
+input_boolean:
+  bedtime_initialized:
+    name: Bedtime storage initialized
+    icon: mdi:database-check
+
+input_datetime:
+  bedtime_dinner_time:
+    name: Dinner reminder
+    has_date: false
+    has_time: true
+  bedtime_bedtime_time:
+    name: Bedtime reminder
+    has_date: false
+    has_time: true
+  bedtime_kid_1_plate:
+    name: Kid 1 plate completion date
+    has_date: true
+    has_time: false
+  bedtime_kid_1_teeth:
+    has_date: true
+    has_time: false
+    name: Kid 1 teeth completion date
+  bedtime_kid_1_outfit:
+    has_date: true
+    has_time: false
+    name: Kid 1 outfit completion date
+  bedtime_kid_2_plate:
+    has_date: true
+    has_time: false
+    name: Kid 2 plate completion date
+  bedtime_kid_2_teeth:
+    has_date: true
+    has_time: false
+    name: Kid 2 teeth completion date
+  bedtime_kid_2_outfit:
+    has_date: true
+    has_time: false
+    name: Kid 2 outfit completion date
+  bedtime_kid_3_plate:
+    has_date: true
+    has_time: false
+    name: Kid 3 plate completion date
+  bedtime_kid_3_teeth:
+    has_date: true
+    has_time: false
+    name: Kid 3 teeth completion date
+  bedtime_kid_3_outfit:
+    has_date: true
+    has_time: false
+    name: Kid 3 outfit completion date
+
+automation:
+  - id: bedtime_initialize_once
+    alias: Bedtime — initialize new storage once
+    description: No initial values on helpers; subsequent restarts restore saved dates.
+    triggers:
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: state
+        entity_id: input_boolean.bedtime_initialized
+        state: "off"
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id:
+            - input_datetime.bedtime_kid_1_plate
+            - input_datetime.bedtime_kid_1_teeth
+            - input_datetime.bedtime_kid_1_outfit
+            - input_datetime.bedtime_kid_2_plate
+            - input_datetime.bedtime_kid_2_teeth
+            - input_datetime.bedtime_kid_2_outfit
+            - input_datetime.bedtime_kid_3_plate
+            - input_datetime.bedtime_kid_3_teeth
+            - input_datetime.bedtime_kid_3_outfit
+        data:
+          date: "1970-01-01"
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.bedtime_dinner_time
+        data:
+          time: "18:00:00"
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.bedtime_bedtime_time
+        data:
+          time: "19:00:00"
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.bedtime_initialized
+    mode: single
+
+template:
+  - sensor:
+      - name: Bedtime routine
+        unique_id: bedtime_routine
+        default_entity_id: sensor.bedtime_routine
+        state: >-
+          {% set dinner = states('input_datetime.bedtime_dinner_time') %}
+          {% set bedtime = states('input_datetime.bedtime_bedtime_time') %}
+          {% set clock = now().strftime('%H:%M:%S') %}
+          {% if not is_state('input_boolean.bedtime_initialized', 'on') %}loading
+          {% elif not ('04:00:00' <= dinner < bedtime <= '23:59:59') %}invalid_schedule
+          {% elif clock < '04:00:00' or clock >= bedtime %}bedtime
+          {% elif clock >= dinner %}dinner
+          {% else %}daytime{% endif %}
+        attributes:
+          routine_date: &routine_date >-
+            {{ (now().date() - timedelta(days=1) if now().hour < 4 else now().date()).isoformat() }}
+          dinner_time: "{{ states('input_datetime.bedtime_dinner_time') }}"
+          bedtime_time: "{{ states('input_datetime.bedtime_bedtime_time') }}"
+
+  # Pure template variables perform each ledger update synchronously. There are
+  # no asynchronous actions between reading the previous total and writing it.
+  # Anchors share the same reducer and schema across all three children.
+  - triggers:
+      - trigger: state
+        entity_id:
+          - input_boolean.bedtime_initialized
+          - input_datetime.bedtime_kid_1_plate
+          - input_datetime.bedtime_kid_1_teeth
+          - input_datetime.bedtime_kid_1_outfit
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: "*"
+      - trigger: event
+        event_type: bedtime_sticker_selected
+        event_data:
+          child_id: kid_1
+    variables:
+      child_id: kid_1
+      routine_date: >-
+        {{ (now().date() - timedelta(days=1) if now().hour < 4 else now().date()).isoformat() }}
+      task_dates: &task_dates >-
+        {{ dict(plate=states('input_datetime.bedtime_' ~ child_id ~ '_plate'),
+                teeth=states('input_datetime.bedtime_' ~ child_id ~ '_teeth'),
+                outfit=states('input_datetime.bedtime_' ~ child_id ~ '_outfit')) }}
+      tasks: &tasks >-
+        {{ dict(plate=task_dates.plate == routine_date,
+                teeth=task_dates.teeth == routine_date,
+                outfit=task_dates.outfit == routine_date) }}
+      ledger: &ledger >-
+        {% set entity = 'sensor.bedtime_' ~ child_id %}
+        {% set month = routine_date[:7] %}
+        {% set old_month = state_attr(entity, 'month') %}
+        {% set records = (state_attr(entity, 'stickers') or {}) if old_month == month else {} %}
+        {% set previous = records.get(routine_date, {}) %}
+        {% set earned = tasks.plate and tasks.teeth and tasks.outfit %}
+        {% set emoji = previous.get('emoji', '⭐') %}
+        {% if trigger.platform == 'event' and earned %}
+          {% set choice = trigger.event.data %}
+          {% if choice.get('child_id') == child_id and choice.get('routine_date') == routine_date
+                and choice.get('sticker') in ['⭐', '🌈', '🚀', '🦄', '🦖', '🐱', '🦋', '⚽'] %}
+            {% set emoji = choice.sticker %}
+          {% endif %}
+        {% endif %}
+        {% if earned or previous %}
+          {% set records = dict(records, **{routine_date: dict(emoji=emoji, earned=earned)}) %}
+        {% endif %}
+        {% set total = (states(entity) | int(0)) + (earned | int) - (previous.get('earned', false) | int) %}
+        {{ dict(month=month, stickers=records, total=[0, total] | max) }}
+    conditions: &ledger_conditions
+      - condition: template
+        value_template: >-
+          {{ is_state('input_boolean.bedtime_initialized', 'on')
+             and has_value('input_datetime.bedtime_' ~ child_id ~ '_plate')
+             and has_value('input_datetime.bedtime_' ~ child_id ~ '_teeth')
+             and has_value('input_datetime.bedtime_' ~ child_id ~ '_outfit') }}
+    sensor:
+      - name: Bedtime Kid 1
+        unique_id: bedtime_kid_1
+        default_entity_id: sensor.bedtime_kid_1
+        icon: mdi:sticker-emoji
+        state: "{{ ledger.total }}"
+        attributes: &ledger_attributes
+          routine_date: "{{ routine_date }}"
+          month: "{{ ledger.month }}"
+          tasks: "{{ tasks }}"
+          completed: "{{ tasks.values() | select('equalto', true) | list | count }}"
+          stickers: "{{ ledger.stickers }}"
+  - triggers:
+      - trigger: state
+        entity_id:
+          - input_boolean.bedtime_initialized
+          - input_datetime.bedtime_kid_2_plate
+          - input_datetime.bedtime_kid_2_teeth
+          - input_datetime.bedtime_kid_2_outfit
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: "*"
+      - trigger: event
+        event_type: bedtime_sticker_selected
+        event_data:
+          child_id: kid_2
+    variables:
+      child_id: kid_2
+      routine_date: *routine_date
+      task_dates: *task_dates
+      tasks: *tasks
+      ledger: *ledger
+    conditions: *ledger_conditions
+    sensor:
+      - name: Bedtime Kid 2
+        unique_id: bedtime_kid_2
+        default_entity_id: sensor.bedtime_kid_2
+        icon: mdi:sticker-emoji
+        state: "{{ ledger.total }}"
+        attributes: *ledger_attributes
+  - triggers:
+      - trigger: state
+        entity_id:
+          - input_boolean.bedtime_initialized
+          - input_datetime.bedtime_kid_3_plate
+          - input_datetime.bedtime_kid_3_teeth
+          - input_datetime.bedtime_kid_3_outfit
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: "*"
+      - trigger: event
+        event_type: bedtime_sticker_selected
+        event_data:
+          child_id: kid_3
+    variables:
+      child_id: kid_3
+      routine_date: *routine_date
+      task_dates: *task_dates
+      tasks: *tasks
+      ledger: *ledger
+    conditions: *ledger_conditions
+    sensor:
+      - name: Bedtime Kid 3
+        unique_id: bedtime_kid_3
+        default_entity_id: sensor.bedtime_kid_3
+        icon: mdi:sticker-emoji
+        state: "{{ ledger.total }}"
+        attributes: *ledger_attributes
+
+script:
+  bedtime_set_task:
+    alias: Bedtime — set a task
+    description: Set an explicit completion value for the displayed routine date.
+    fields:
+      child_id: {required: true, selector: {select: {options: [kid_1, kid_2, kid_3]}}}
+      task: {required: true, selector: {select: {options: [plate, teeth, outfit]}}}
+      completed: {required: true, selector: {boolean: null}}
+      routine_date: {required: true, selector: {date: null}}
+    sequence:
+      - action: script.bedtime_command
+        data:
+          operation: task
+          child_id: "{{ child_id }}"
+          task: "{{ task }}"
+          completed: "{{ completed }}"
+          routine_date: "{{ routine_date }}"
+    mode: parallel
+    max: 30
+  bedtime_choose_sticker:
+    alias: Bedtime — choose a sticker
+    fields:
+      child_id: {required: true, selector: {select: {options: [kid_1, kid_2, kid_3]}}}
+      routine_date: {required: true, selector: {date: null}}
+      sticker: {required: true, selector: {select: {options: ['⭐', '🌈', '🚀', '🦄', '🦖', '🐱', '🦋', '⚽']}}}
+    sequence:
+      - action: script.bedtime_command
+        data:
+          operation: sticker
+          child_id: "{{ child_id }}"
+          routine_date: "{{ routine_date }}"
+          sticker: "{{ sticker }}"
+    mode: parallel
+    max: 30
+  bedtime_command:
+    alias: Bedtime — serialized storage command
+    description: Internal dispatcher; dashboard calls the two scripts above.
+    mode: queued
+    max: 30
+    sequence:
+      - variables:
+          current_day: >-
+            {{ (now().date() - timedelta(days=1) if now().hour < 4 else now().date()).isoformat() }}
+      - if:
+          - condition: template
+            value_template: >-
+              {{ child_id | default('') not in ['kid_1', 'kid_2', 'kid_3']
+                 or operation | default('') not in ['task', 'sticker']
+                 or routine_date | default('') != current_day
+                 or not is_state('input_boolean.bedtime_initialized', 'on') }}
+        then:
+          - stop: "Bedtime is not ready, or this action belongs to an old routine day. Refresh the dashboard."
+            error: true
+      - variables:
+          ledger_entity: "{{ 'sensor.bedtime_' ~ child_id }}"
+      - if:
+          - condition: template
+            value_template: "{{ not has_value(ledger_entity) }}"
+        then:
+          - stop: "This child's saved progress is unavailable. Try again when Home Assistant reconnects."
+            error: true
+      - choose:
+          - conditions: "{{ operation == 'task' }}"
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ task | default('') not in ['plate', 'teeth', 'outfit'] or completed is not boolean }}"
+                then:
+                  - stop: "Invalid task or completion value."
+                    error: true
+              - action: input_datetime.set_datetime
+                target:
+                  entity_id: "{{ 'input_datetime.bedtime_' ~ child_id ~ '_' ~ task }}"
+                data:
+                  date: "{{ current_day if completed else '1970-01-01' }}"
+              - wait_template: >-
+                  {{ state_attr(ledger_entity, 'routine_date') == current_day
+                     and (state_attr(ledger_entity, 'tasks') or {}).get(task) == completed }}
+                timeout: "00:00:05"
+                continue_on_timeout: false
+          - conditions: "{{ operation == 'sticker' }}"
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ sticker | default('') not in ['⭐', '🌈', '🚀', '🦄', '🦖', '🐱', '🦋', '⚽']
+                         or state_attr(ledger_entity, 'routine_date') != current_day
+                         or state_attr(ledger_entity, 'completed') != 3 }}
+                then:
+                  - stop: "Finish all three tasks to choose a sticker."
+                    error: true
+              - event: bedtime_sticker_selected
+                event_data:
+                  child_id: "{{ child_id }}"
+                  routine_date: "{{ current_day }}"
+                  sticker: "{{ sticker }}"
+              - wait_template: >-
+                  {{ (state_attr(ledger_entity, 'stickers') or {}).get(current_day, {}).get('emoji') == sticker }}
+                timeout: "00:00:05"
+                continue_on_timeout: false
