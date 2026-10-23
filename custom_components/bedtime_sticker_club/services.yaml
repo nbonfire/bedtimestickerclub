@@ -1,0 +1,37 @@
+set_task:
+  fields:
+    child_id:
+      required: true
+      selector:
+        select:
+          options: [kid_1, kid_2, kid_3]
+    task:
+      required: true
+      selector:
+        select:
+          options: [plate, teeth, outfit]
+    completed:
+      required: true
+      selector:
+        boolean:
+    routine_date:
+      required: true
+      selector:
+        date:
+
+choose_sticker:
+  fields:
+    child_id:
+      required: true
+      selector:
+        select:
+          options: [kid_1, kid_2, kid_3]
+    routine_date:
+      required: true
+      selector:
+        date:
+    sticker:
+      required: true
+      selector:
+        select:
+          options: ['⭐', '🌈', '🚀', '🦄', '🦖', '🐱', '🦋', '⚽']

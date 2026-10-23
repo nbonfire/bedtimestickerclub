@@ -1,0 +1,23 @@
+# Local preview configuration. Production installation uses the README snippet.
+homeassistant:
+  name: Bedtime Test
+  time_zone: !env_var TZ
+  latitude: 0
+  longitude: 0
+  elevation: 0
+  unit_system: us_customary
+  currency: USD
+
+frontend:
+api:
+http:
+config:
+recorder:
+logger:
+  default: warning
+
+lovelace:
+  resource_mode: yaml
+  resources:
+    - url: /local/button-card.js?v=7.0.1
+      type: module

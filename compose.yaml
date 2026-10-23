@@ -23,8 +23,7 @@ services:
       - ./.test-ha:/config
       - ./docker/homeassistant/configuration.yaml:/config/configuration.yaml:ro
       - ./docker/homeassistant/ui-lovelace.yaml:/config/ui-lovelace.yaml:ro
-      - ./packages:/work/packages:ro
-      - ./dashboards:/work/dashboards:ro
+      - ./custom_components:/config/custom_components:ro
     restart: unless-stopped
     stop_grace_period: 60s
     healthcheck:

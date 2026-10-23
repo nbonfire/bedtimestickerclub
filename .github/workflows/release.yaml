@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release version, files, tests, and configuration
+        run: |
+          docker run --rm --entrypoint sh -v "$PWD:/work:ro" -e GITHUB_REF_NAME \
+            ghcr.io/home-assistant/home-assistant:2026.10.1 -c '
+              set -eu
+              python /work/scripts/validate_repository.py --tag "$GITHUB_REF_NAME"
+              python -m unittest discover -s /work/tests -v
+              mkdir -p /tmp/bedtime-check
+              cp -R /work/custom_components /tmp/bedtime-check/
+              cp /work/tests/configuration.yaml /tmp/bedtime-check/configuration.yaml
+              python -m homeassistant --script check_config --config /tmp/bedtime-check
+            '
+      - name: Build integration archive
+        run: python scripts/build_release.py
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: dist/bedtime_sticker_club.zip

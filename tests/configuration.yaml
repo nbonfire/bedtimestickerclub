@@ -1,0 +1,7 @@
+# Minimal host configuration. Bedtime Sticker Club is added through config flow.
+homeassistant:
+  name: Bedtime validation
+  time_zone: America/New_York
+
+frontend:
+lovelace:

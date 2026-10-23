@@ -1,0 +1,53 @@
+{
+  "title": "Bedtime Sticker Club",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bedtime Sticker Club",
+        "description": "Choose the names for the three checklists. Dinner defaults to 6 pm and bedtime to 7 pm; change these on the Parent settings page. Existing saved YAML progress is imported automatically.",
+        "data": {
+          "kid_1_name": "First child's name",
+          "kid_2_name": "Second child's name",
+          "kid_3_name": "Third child's name"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Bedtime Sticker Club is already configured.",
+      "legacy_package_active": "Remove the old Bedtime YAML package include and restart Home Assistant, then add this integration. Your saved stickers will be imported. See the README migration instructions."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Checklist names",
+        "data": {
+          "kid_1_name": "First child's name",
+          "kid_2_name": "Second child's name",
+          "kid_3_name": "Third child's name"
+        }
+      }
+    }
+  },
+  "services": {
+    "set_task": {
+      "name": "Set a bedtime task",
+      "description": "Set an explicit completion value for the displayed routine date.",
+      "fields": {
+        "child_id": {"name": "Child", "description": "The child's stable checklist identifier."},
+        "routine_date": {"name": "Routine date", "description": "Date shown on the checklist."},
+        "task": {"name": "Task", "description": "Which task to change."},
+        "completed": {"name": "Completed", "description": "Whether this task is complete."}
+      }
+    },
+    "choose_sticker": {
+      "name": "Choose a bedtime sticker",
+      "description": "Choose a sticker after completing all three tasks.",
+      "fields": {
+        "child_id": {"name": "Child", "description": "The child's stable checklist identifier."},
+        "routine_date": {"name": "Routine date", "description": "Date shown on the checklist."},
+        "sticker": {"name": "Sticker", "description": "The emoji to save for this day."}
+      }
+    }
+  }
+}
