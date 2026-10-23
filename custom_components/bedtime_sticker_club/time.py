@@ -1,6 +1,7 @@
 """Persistent reminder times editable from the parent dashboard."""
 
 from homeassistant.components.time import TimeEntity
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
@@ -30,4 +31,4 @@ class BedtimeTime(CoordinatorEntity, TimeEntity):
         return dt_util.parse_time(self.coordinator.data[self.key])
 
     async def async_set_value(self, value):
-        await self.coordinator.async_set_time(self.key, value)
+        raise Unauthorized("Change bedtime schedules in Parent Controls.")

@@ -8,9 +8,16 @@ from .coordinator import routine_date
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([
-        BedtimeSensor(entry.runtime_data, child) for child in ("routine", *CHILDREN)
-    ])
+    coordinator = entry.runtime_data
+    async_add_entities([BedtimeSensor(coordinator, "routine"), *[
+        BedtimeSensor(coordinator, child)
+        for child in coordinator.profile_ids()
+    ]])
+
+    def child_added(child):
+        async_add_entities([BedtimeSensor(coordinator, child)])
+
+    coordinator._async_child_added = child_added
 
 
 class BedtimeSensor(CoordinatorEntity, SensorEntity):
@@ -29,7 +36,8 @@ class BedtimeSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         if self.child == "routine":
             return self.coordinator.phase
-        return self.coordinator.data["children"][self.child]["total"]
+        child = self.coordinator.data["children"][self.child]
+        return child["total"]
 
     @property
     def extra_state_attributes(self):
@@ -39,4 +47,6 @@ class BedtimeSensor(CoordinatorEntity, SensorEntity):
                 "dinner_time": self.coordinator.data["dinner_time"],
                 "bedtime_time": self.coordinator.data["bedtime_time"],
             }
-        return self.coordinator.child_attributes(self.child)
+        attrs = self.coordinator.child_attributes(self.child)
+        attrs["lifetime_total"] = self.coordinator.data["children"][self.child]["total"]
+        return attrs

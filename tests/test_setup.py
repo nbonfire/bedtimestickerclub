@@ -71,9 +71,17 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 }, blocking=True)
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_1").state, "1")
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_1").attributes["stickers"][day]["emoji"], "🚀")
-                await hass.services.async_call("time", "set_value", {
-                    "entity_id": "time.bedtime_dinner_time", "time": "17:30:00",
-                }, blocking=True)
+                # Entity-targeted writes are closed; schedule changes go through
+                # the administrator-only Parent Controls websocket.
+                from homeassistant.exceptions import HomeAssistantError
+                with self.assertRaises(HomeAssistantError):
+                    await hass.services.async_call("time", "set_value", {
+                        "entity_id": "time.bedtime_dinner_time", "time": "17:30:00",
+                    }, blocking=True)
+                self.assertEqual(hass.states.get("time.bedtime_dinner_time").state, "18:00:00")
+                await entry.runtime_data.async_parent_control(
+                    "schedule", schedule={"dinner_time": "17:30:00"},
+                )
                 self.assertEqual(hass.states.get("time.bedtime_dinner_time").state, "17:30:00")
                 duplicate = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
                 self.assertEqual(duplicate["reason"], "already_configured")

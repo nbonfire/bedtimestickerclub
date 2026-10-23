@@ -6,18 +6,70 @@ from pathlib import Path
 import probatio as vol
 
 from homeassistant.components import frontend
+from homeassistant.components import websocket_api
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.components.lovelace.dashboard import LovelaceYAML
 from homeassistant.const import Platform
-from homeassistant.exceptions import ConfigEntryError
+from homeassistant.exceptions import ConfigEntryError, Unauthorized
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import CHILDREN, DASHBOARD_URL, DOMAIN, STICKERS, TASKS, TITLE
+from .const import DASHBOARD_URL, DOMAIN, STICKERS, TITLE
 from .coordinator import BedtimeCoordinator
 
 PLATFORMS = [Platform.SENSOR, Platform.TIME]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+FRONTEND_URL = f"/{DOMAIN}/static/bedtime-sticker-club.js"
+
+
+def require_parent_admin(connection):
+    """Require an authenticated Home Assistant administrator for parent actions."""
+    if not connection.user.is_admin:
+        raise Unauthorized("Parent Controls are available to Home Assistant administrators.")
+
+
+async def async_handle_parent_action(hass, connection, entry_id, action, data):
+    """Authorize and dispatch a Parent Controls request."""
+    require_parent_admin(connection)
+    coordinator = hass.data[DOMAIN].get(entry_id) if entry_id else next(
+        iter(hass.data[DOMAIN].values()), None,
+    )
+    if coordinator is None:
+        raise ServiceValidationError("Bedtime Sticker Club is not loaded.")
+    return await coordinator.async_parent_control(action, **data)
+
+
+async def async_setup(hass, config: ConfigType):
+    """Register the native cards and the administrator-only Parent Controls API."""
+    from homeassistant.http import StaticPathConfig
+
+    hass.data.setdefault(DOMAIN, {})
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(
+            FRONTEND_URL,
+            str(Path(__file__).parent / "frontend/bedtime-sticker-club.js"),
+            cache_headers=False,
+        )
+    ])
+    frontend.add_extra_js_url(hass, FRONTEND_URL)
+
+    @websocket_api.websocket_command({
+        vol.Required("type"): f"{DOMAIN}/admin",
+        vol.Optional("entry_id"): cv.string,
+        vol.Required("action"): cv.string,
+        vol.Optional("data", default={}): dict,
+    })
+    @websocket_api.async_response
+    async def parent_controls(hass, connection, message):
+        result = await async_handle_parent_action(
+            hass, connection, message.get("entry_id"),
+            message["action"], message["data"],
+        )
+        connection.send_result(message["id"], result or {})
+
+    websocket_api.async_register_command(hass, parent_controls)
+    return True
 
 
 def register_dashboard(hass):
@@ -46,9 +98,10 @@ async def async_setup_entry(hass, entry):
     coordinator = BedtimeCoordinator(hass, entry)
     await coordinator.async_initialize()
     entry.runtime_data = coordinator
+    hass.data[DOMAIN][entry.entry_id] = coordinator
 
     registry = er.async_get(hass)
-    for key in ("routine", *CHILDREN):
+    for key in ("routine", *coordinator.profile_ids()):
         entity_id = f"sensor.bedtime_{key}"
         existing = registry.async_get(entity_id)
         if existing and existing.platform == "template" and existing.unique_id == f"bedtime_{key}":
@@ -81,15 +134,23 @@ async def async_setup_entry(hass, entry):
             sticker=values["sticker"],
         )
 
+    async def set_avatar(call):
+        values = call.data
+        await coordinator.async_set_avatar(values["child_id"], values["avatar"])
+
     common = {
-        vol.Required("child_id"): vol.In(CHILDREN),
+        vol.Required("child_id"): cv.string,
         vol.Required("routine_date"): cv.string,
     }
     hass.services.async_register(DOMAIN, "set_task", set_task, schema=vol.Schema({
-        **common, vol.Required("task"): vol.In(TASKS), vol.Required("completed"): bool,
+        **common, vol.Required("task"): cv.string, vol.Required("completed"): bool,
     }))
     hass.services.async_register(DOMAIN, "choose_sticker", choose_sticker, schema=vol.Schema({
         **common, vol.Required("sticker"): vol.In(STICKERS),
+    }))
+    hass.services.async_register(DOMAIN, "set_avatar", set_avatar, schema=vol.Schema({
+        vol.Required("child_id"): cv.string,
+        vol.Required("avatar"): cv.string,
     }))
     return True
 
@@ -97,11 +158,12 @@ async def async_setup_entry(hass, entry):
 async def async_unload_entry(hass, entry):
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
-    for service in ("set_task", "choose_sticker"):
+    for service in ("set_task", "choose_sticker", "set_avatar"):
         hass.services.async_remove(DOMAIN, service)
     dashboard = entry.runtime_data.dashboard
     lovelace = hass.data[LOVELACE_DATA]
     if dashboard is not None and lovelace.dashboards.get(DASHBOARD_URL) is dashboard:
         lovelace.dashboards.pop(DASHBOARD_URL)
         frontend.async_remove_panel(hass, DASHBOARD_URL)
+    hass.data[DOMAIN].pop(entry.entry_id, None)
     return True

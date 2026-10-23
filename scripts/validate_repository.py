@@ -35,18 +35,21 @@ def main():
     assert (COMPONENT / "brand/icon.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
     assert manifest["config_flow"] is True
-    for filename in ("config_flow.py", "coordinator.py", "sensor.py", "time.py", "services.yaml", "translations/en.json"):
+    for filename in ("config_flow.py", "coordinator.py", "sensor.py", "time.py", "services.yaml", "strings.json", "translations/en.json", "frontend/bedtime-sticker-club.js"):
         assert (COMPONENT / filename).is_file(), filename
     strings = json.loads((COMPONENT / "strings.json").read_text())
     assert strings == json.loads((COMPONENT / "translations/en.json").read_text())
     dashboard = yaml.safe_load((COMPONENT / "dashboard.yaml").read_text())
-    assert set(yaml.safe_load((COMPONENT / "services.yaml").read_text())) == {"set_task", "choose_sticker"}
-    assert "script.bedtime_" not in (COMPONENT / "dashboard.yaml").read_text()
+    assert set(yaml.safe_load((COMPONENT / "services.yaml").read_text())) == {
+        "set_task", "choose_sticker", "set_avatar"
+    }
+    assert set(card["type"] for view in dashboard["views"]
+               for section in view.get("sections", [])
+               for card in section.get("cards", [])) <= {"custom:bedtime-sticker-family"}
+    assert "button_card_templates" not in dashboard
     assert [view["path"] for view in dashboard["views"]] == ["tonight", "parents"]
-    children = dashboard["views"][0]["sections"]
-    assert [child["cards"][0]["variables"]["child_id"] for child in children] == [
-        "kid_1", "kid_2", "kid_3"
-    ]
+    assert dashboard["views"][0]["sections"][0]["cards"][0]["type"] == "custom:bedtime-sticker-family"
+    assert "type: custom:bedtime-sticker-parent-controls" in (COMPONENT / "dashboard.yaml").read_text()
     print(f"HACS payload validated: {manifest['domain']} {manifest['version']}")
 
 
