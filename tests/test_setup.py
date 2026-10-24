@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from homeassistant import bootstrap, loader
 from homeassistant.core import HomeAssistant, State
@@ -29,7 +30,10 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                     "frontend": {}, "lovelace": {},
                 }, hass)
                 await hass.async_start()
-                self.assertTrue(await async_setup_component(hass, DOMAIN, {}))
+                from homeassistant import setup
+                with patch.object(setup, "_log_error_setup_error") as log_setup_error:
+                    initialized = await async_setup_component(hass, DOMAIN, {})
+                self.assertTrue(initialized, f"component setup errors: {log_setup_error.call_args_list}")
                 # A disabled legacy template can leave an unavailable placeholder;
                 # migration must prefer the real saved state and reuse its ID.
                 registry = er.async_get(hass)
