@@ -58,10 +58,15 @@ class BedtimeCard extends HTMLElement {
       .child.size-large { padding:22px; border-radius:30px }
       .child.size-compact .name { font-size:20px }
       .child.size-large .name { font-size:28px }
+      .child.size-compact .avatar { width:48px; height:48px; min-width:48px; min-height:48px;
+        border-radius:16px; font-size:30px }
+      .child.size-large .avatar { width:72px; height:72px; min-width:72px; min-height:72px;
+        border-radius:24px; font-size:45px }
       .identity { display:flex; align-items:center; gap:12px; min-width:0 }
-      .avatar { width:56px; height:56px; flex:none; display:grid; place-items:center;
-        border:0; border-radius:18px; color:inherit; background:var(--tint,#f0e6ff);
-        font-size:36px; cursor:pointer }
+      .avatar { box-sizing:border-box; width:58px; height:58px; min-width:58px; min-height:58px;
+        flex:none; display:grid; place-items:center; padding:0; border:0; overflow:hidden;
+        border-radius:20px; color:inherit; background:var(--tint,#f0e6ff); font-size:37px;
+        line-height:1; text-align:center; cursor:pointer }
       .avatar:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid #222; outline-offset:2px }
       .name { font-size:24px; font-weight:850; overflow-wrap:anywhere }
       .muted { color:var(--muted); font-size:13px }
@@ -169,6 +174,37 @@ class BedtimeCard extends HTMLElement {
       entry_id: this._config.entry_id || sensor?.attributes.integration_entry_id,
       action, data,
     });
+  }
+}
+
+class BedtimeHeaderCard extends BedtimeCard {
+  static cardType = "bedtime-sticker-header";
+
+  static getStubConfig() { return {type: `custom:${this.cardType}`}; }
+
+  render() {
+    if (!this._hass) return;
+    this.shell("Bedtime Sticker Club 🌟");
+    const sensor = this._hass.states["sensor.bedtime_routine"];
+    const profiles = Object.values(this._hass.states).filter((state) =>
+      state.entity_id.startsWith("sensor.bedtime_") && state.attributes.routine === "bedtime");
+    const ready = profiles.length > 0 && profiles.every((state) => state.state !== "unavailable");
+    const active = sensor?.attributes.active_routine || "bedtime";
+    const messages = {
+      morning: "Before school · Four little tasks to start the day.",
+      bedtime: "Tonight’s routine · Three little tasks, one happy sticker.",
+    };
+    this._body.textContent = this._hass.connected === false
+      ? "Connection lost. Your saved stickers are safe. Reconnecting…"
+      : ready ? messages[active] : "Waiting for saved progress from Home Assistant…";
+    if (this._hass.user?.is_admin) {
+      const link = this.button("⚙", () => {
+        window.history.pushState(null, "", "/bedtime-club/parents");
+        window.dispatchEvent(new Event("location-changed"));
+      }, "icon-button");
+      link.setAttribute("aria-label", "Parent Controls");
+      this.shadowRoot.querySelector("header").append(link);
+    }
   }
 }
 
@@ -1043,10 +1079,17 @@ class BedtimeCardEditor extends HTMLElement {
 }
 
 customElements.define("bedtime-sticker-family", BedtimeFamilyCard);
+customElements.define("bedtime-sticker-header", BedtimeHeaderCard);
 customElements.define("bedtime-sticker-child-card", BedtimeChildChecklistCard);
 customElements.define("bedtime-sticker-parent-controls", BedtimeParentCard);
 customElements.define("bedtime-card-editor", BedtimeCardEditor);
 window.customCards = window.customCards || [];
+window.customCards.push({
+  type: "bedtime-sticker-header",
+  name: "Bedtime Sticker Club header",
+  description: "A header and Parent Controls link for a Bedtime Sticker Club dashboard.",
+  preview: true,
+});
 window.customCards.push({
   type: "bedtime-sticker-family",
   name: "Bedtime Sticker Club family dashboard",

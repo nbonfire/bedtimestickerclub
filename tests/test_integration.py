@@ -32,6 +32,7 @@ from custom_components.bedtime_sticker_club import (
 from custom_components.bedtime_sticker_club.avatar import ChildAvatarView
 from custom_components.bedtime_sticker_club.const import DOMAIN, ROUTINES, TASKS
 from custom_components.bedtime_sticker_club.coordinator import BedtimeCoordinator, routine_date
+from custom_components.bedtime_sticker_club.dashboard import dashboard_config
 
 ZONE = ZoneInfo("America/New_York")
 
@@ -276,6 +277,22 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([v["path"] for v in data["views"]], ["tonight", "parents"])
         self.assertIsNone(register_dashboard(self.hass))
         self.assertIs(self.hass.data[LOVELACE_DATA].dashboards["bedtime-club"], dashboard)
+
+    async def test_bundled_dashboard_generates_one_section_per_active_child(self):
+        config = dashboard_config(list(self.coordinator.data["profiles"].values()))
+        sections = config["views"][0]["sections"]
+        self.assertEqual(len(sections), 3)
+        self.assertEqual(
+            [section["cards"][0]["child_id"] for section in sections],
+            ["kid_1", "kid_2", "kid_3"],
+        )
+        profiles = deepcopy(list(self.coordinator.data["profiles"].values()))
+        profiles[1]["active"] = False
+        self.assertEqual(len(dashboard_config(profiles)["views"][0]["sections"]), 2)
+        profiles.append({"id": "kid_4", "active": True})
+        dynamic = dashboard_config(profiles)
+        self.assertEqual(len(dynamic["views"][0]["sections"]), 3)
+        self.assertEqual(dynamic["views"][0]["sections"][-1]["cards"][0]["child_id"], "kid_4")
 
     async def test_creates_archives_orders_and_restores_children(self):
         await self.coordinator.async_parent_control("profile_create", name="Robin")

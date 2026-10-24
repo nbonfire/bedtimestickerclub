@@ -19,6 +19,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from .avatar import ChildAvatarView, remove_avatar_file
 from .const import DASHBOARD_URL, DOMAIN, ROUTINES, STICKERS, TITLE
 from .coordinator import BedtimeCoordinator
+from .dashboard import write_dashboard
 
 PLATFORMS = [Platform.SENSOR, Platform.TIME]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -75,7 +76,7 @@ async def async_setup(hass, config: ConfigType):
     return True
 
 
-def register_dashboard(hass):
+def register_dashboard(hass, filename=None):
     """Register a bundled dashboard, respecting an existing personal copy."""
     lovelace = hass.data[LOVELACE_DATA]
     if DASHBOARD_URL in lovelace.dashboards:
@@ -85,7 +86,7 @@ def register_dashboard(hass):
     dashboard = LovelaceYAML(hass, DASHBOARD_URL, {
         "mode": "yaml", "title": TITLE, "icon": "mdi:star-face",
         "show_in_sidebar": True, "require_admin": False,
-        "filename": str(Path(__file__).parent / "dashboard.yaml"),
+        "filename": filename or str(Path(__file__).parent / "dashboard.yaml"),
     })
     frontend.async_register_built_in_panel(
         hass, "lovelace", sidebar_title=TITLE, sidebar_icon="mdi:star-face",
@@ -102,6 +103,18 @@ async def async_setup_entry(hass, entry):
     await coordinator.async_initialize()
     entry.runtime_data = coordinator
     hass.data[DOMAIN][entry.entry_id] = coordinator
+    generated_dashboard = hass.config.path(DOMAIN, "dashboard.yaml")
+    await hass.async_add_executor_job(
+        write_dashboard, generated_dashboard, list(coordinator.data["profiles"].values()),
+    )
+
+    async def async_update_dashboard():
+        await hass.async_add_executor_job(
+            write_dashboard, generated_dashboard,
+            list(coordinator.data["profiles"].values()),
+        )
+
+    coordinator._async_update_dashboard = async_update_dashboard
 
     registry = er.async_get(hass)
     for key in ("routine", *coordinator.profile_ids()):
@@ -117,7 +130,7 @@ async def async_setup_entry(hass, entry):
             if morning_entry and morning_entry.platform != DOMAIN:
                 raise ConfigEntryError(f"The entity ID {morning_entity_id} is already in use")
 
-    coordinator.dashboard = register_dashboard(hass)
+    coordinator.dashboard = register_dashboard(hass, generated_dashboard)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(async_track_time_interval(
         hass, coordinator.async_tick, timedelta(minutes=1), name=DOMAIN,

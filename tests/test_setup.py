@@ -70,6 +70,12 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 await hass.async_block_till_done()
                 self.assertEqual(entry.state, ConfigEntryState.LOADED)
                 self.assertTrue(frontend.async_panel_exists(hass, "bedtime-club"))
+                from homeassistant.util.yaml import load_yaml_dict
+                generated_path = hass.config.path(DOMAIN, "dashboard.yaml")
+                generated_dashboard = await hass.async_add_executor_job(
+                    load_yaml_dict, generated_path
+                )
+                self.assertEqual(len(generated_dashboard["views"][0]["sections"]), 3)
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_3").state, "7")
                 self.assertEqual(registry.async_get("sensor.bedtime_kid_3").platform, DOMAIN)
                 for entity in ("sensor.bedtime_routine", "sensor.bedtime_kid_1", "sensor.bedtime_kid_2", "sensor.bedtime_kid_3", "time.bedtime_dinner_time", "time.bedtime_bedtime_time", "time.bedtime_routine_switch_time"):
@@ -113,6 +119,16 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 })
                 await hass.async_block_till_done()
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_1").attributes["child_name"], "Robin")
+                profile_id = await entry.runtime_data.async_parent_control(
+                    "profile_create", name="Taylor",
+                )
+                await hass.async_block_till_done()
+                generated_dashboard = await hass.async_add_executor_job(load_yaml_dict, generated_path)
+                self.assertEqual(len(generated_dashboard["views"][0]["sections"]), 4)
+                self.assertTrue(hass.states.get(f"sensor.bedtime_{profile_id}"))
+                await entry.runtime_data.async_parent_control("profile_archive", child_id=profile_id)
+                generated_dashboard = await hass.async_add_executor_job(load_yaml_dict, generated_path)
+                self.assertEqual(len(generated_dashboard["views"][0]["sections"]), 3)
                 self.assertTrue(await hass.config_entries.async_unload(entry.entry_id))
                 self.assertFalse(hass.services.has_service(DOMAIN, "set_task"))
                 self.assertFalse(frontend.async_panel_exists(hass, "bedtime-club"))

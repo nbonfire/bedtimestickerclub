@@ -1,3 +1,5 @@
+# HACS setup generates /config/bedtime_sticker_club/dashboard.yaml from the
+# active profile list. This fixed three-child layout keeps the preview useful.
 title: Bedtime Sticker Club
 views:
   - title: Sticker Club
@@ -6,12 +8,36 @@ views:
     type: sections
     max_columns: 3
     background: '#fff4da'
+    header:
+      layout: responsive
+      badges_position: bottom
+      card:
+        type: custom:bedtime-sticker-header
     sections:
       - type: grid
         cards:
-          - type: custom:bedtime-sticker-family
-            grid_options:
-              columns: full
+          - type: custom:bedtime-sticker-child-card
+            child_id: kid_1
+            routine: auto
+            size: inherit
+            calendar: collapsible
+            grid_options: {columns: full}
+      - type: grid
+        cards:
+          - type: custom:bedtime-sticker-child-card
+            child_id: kid_2
+            routine: auto
+            size: inherit
+            calendar: collapsible
+            grid_options: {columns: full}
+      - type: grid
+        cards:
+          - type: custom:bedtime-sticker-child-card
+            child_id: kid_3
+            routine: auto
+            size: inherit
+            calendar: collapsible
+            grid_options: {columns: full}
   - title: Parent Controls
     path: parents
     icon: mdi:cog-outline
