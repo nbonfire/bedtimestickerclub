@@ -16,7 +16,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
-from .avatar import ChildAvatarView
+from .avatar import ChildAvatarView, remove_avatar_file
 from .const import DASHBOARD_URL, DOMAIN, ROUTINES, STICKERS, TITLE
 from .coordinator import BedtimeCoordinator
 
@@ -159,7 +159,7 @@ async def async_setup_entry(hass, entry):
         old_image = await coordinator.async_set_avatar(values["child_id"], values["avatar"])
         if isinstance(old_image, str) and old_image.startswith(f"{values['child_id']}-"):
             old_path = Path(hass.config.path(DOMAIN, "avatars", old_image))
-            await hass.async_add_executor_job(old_path.unlink, missing_ok=True)
+            await hass.async_add_executor_job(remove_avatar_file, old_path)
 
     common = {
         vol.Required("child_id"): cv.string,

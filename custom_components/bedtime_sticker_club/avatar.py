@@ -20,6 +20,14 @@ MAX_IMAGE_PIXELS = 16_000_000
 SUPPORTED_FORMATS = {"JPEG", "PNG", "WEBP"}
 
 
+def remove_avatar_file(path: str | Path) -> None:
+    """Remove an obsolete avatar file when it exists."""
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        pass
+
+
 def normalize_avatar(upload: bytes, destination: str | Path) -> None:
     """Decode a supported image, strip metadata, center-crop, and save a WebP."""
     if not upload or len(upload) > MAX_UPLOAD_BYTES:
@@ -108,11 +116,11 @@ class ChildAvatarView(HomeAssistantView):
             await hass.async_add_executor_job(normalize_avatar, upload, image_path)
             await coordinator.async_set_avatar_image(child_id, filename)
         except ValueError as err:
-            await hass.async_add_executor_job(image_path.unlink, missing_ok=True)
+            await hass.async_add_executor_job(remove_avatar_file, image_path)
             raise web.HTTPBadRequest(text=str(err)) from err
         except Exception:
-            await hass.async_add_executor_job(image_path.unlink, missing_ok=True)
+            await hass.async_add_executor_job(remove_avatar_file, image_path)
             raise
         if isinstance(previous, str) and re.fullmatch(rf"{re.escape(child_id)}-[0-9a-f]{{32}}\.webp", previous):
-            await hass.async_add_executor_job(self._path(hass, previous).unlink, missing_ok=True)
+            await hass.async_add_executor_job(remove_avatar_file, self._path(hass, previous))
         return self.json({"avatar_image": filename})

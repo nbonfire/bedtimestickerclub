@@ -713,8 +713,6 @@ class BedtimeCoordinator(DataUpdateCoordinator):
         async with self.lock:
             if child_id not in self.data["profiles"] or not self.data["profiles"][child_id]["active"]:
                 raise ServiceValidationError("Choose an active child profile.")
-            if image_name != f"{child_id}.webp":
-                raise ServiceValidationError("Invalid avatar file name.")
             data = deepcopy(self.data)
             if not re.fullmatch(rf"{re.escape(child_id)}-[0-9a-f]{{32}}\.webp", image_name):
                 raise ServiceValidationError("Invalid avatar file name.")
