@@ -27,7 +27,9 @@ class BedtimeCard extends HTMLElement {
   }
 
   static getConfigElement() {
-    return document.createElement("bedtime-card-editor");
+    const editor = document.createElement("bedtime-card-editor");
+    editor.cardType = this.cardType;
+    return editor;
   }
 
   static getStubConfig() {
@@ -171,6 +173,10 @@ class BedtimeCard extends HTMLElement {
 }
 
 class BedtimeFamilyCard extends BedtimeCard {
+  static cardType = "bedtime-sticker-family";
+
+  static getStubConfig() { return {type: `custom:${this.cardType}`}; }
+
   constructor() {
     super();
     this._routineOverrides = new Map();
@@ -308,13 +314,15 @@ class BedtimeFamilyCard extends BedtimeCard {
     }
     const total = routineAttributes.lifetime_total ?? selected.state;
     card.append(this.element("p", `🏆 ${total} ${routine}${Number(total) === 1 ? "" : "s"} completed`, "muted"));
+    const calendarEnabled = this.constructor !== BedtimeChildChecklistCard
+      || (this._config?.calendar || "collapsible") === "collapsible";
     const calendarOpen = this._expandedCalendars.has(attributes.child_id);
-    card.append(this.button(`${calendarOpen ? "Hide" : "Show"} sticker calendar`, () => {
+    if (calendarEnabled) card.append(this.button(`${calendarOpen ? "Hide" : "Show"} sticker calendar`, () => {
       if (calendarOpen) this._expandedCalendars.delete(attributes.child_id);
       else this._expandedCalendars.add(attributes.child_id);
       this.render();
     }));
-    if (calendarOpen && morningState) {
+    if (calendarEnabled && calendarOpen && morningState) {
       card.append(renderCalendar(this, [{bedtime: state, morning: morningState}], attributes.month,
         this._selectedCalendarDays.get(attributes.child_id), (day) => {
           this._selectedCalendarDays.set(attributes.child_id, day);
@@ -426,7 +434,72 @@ class BedtimeFamilyCard extends BedtimeCard {
   }
 }
 
+class BedtimeChildChecklistCard extends BedtimeFamilyCard {
+  static cardType = "bedtime-sticker-child-card";
+
+  static getStubConfig() {
+    return {
+      type: `custom:${this.cardType}`,
+      routine: "auto",
+      size: "inherit",
+      calendar: "collapsible",
+    };
+  }
+
+  setConfig(config) {
+    super.setConfig(config);
+    if (config.routine !== undefined && !["auto", "bedtime", "morning"].includes(config.routine)) {
+      throw new Error("routine must be auto, bedtime, or morning.");
+    }
+    if (config.size !== undefined && !["inherit", "compact", "standard", "large"].includes(config.size)) {
+      throw new Error("size must be inherit, compact, standard, or large.");
+    }
+    if (config.calendar !== undefined && !["collapsible", "hidden"].includes(config.calendar)) {
+      throw new Error("calendar must be collapsible or hidden.");
+    }
+  }
+
+  render() {
+    if (!this._hass) return;
+    this.shell("Bedtime checklist");
+    const state = Object.values(this._hass.states).find((candidate) =>
+      candidate.attributes.child_id === this._config.child_id
+      && candidate.attributes.routine === "bedtime");
+    if (!state) {
+      this._body.textContent = "Choose a child in the card settings.";
+      return;
+    }
+    const attributes = state.attributes;
+    if (attributes.archived) {
+      this._body.textContent = `${attributes.child_name}'s profile is archived.`;
+      return;
+    }
+    const morning = Object.values(this._hass.states).find((candidate) =>
+      candidate.attributes.child_id === attributes.child_id
+      && candidate.attributes.routine === "morning");
+    const autoRoutine = this._hass.states["sensor.bedtime_routine"]?.attributes.active_routine || "bedtime";
+    if (this._config.routine && this._config.routine !== "auto" && !this._routineOverrides.has(attributes.child_id)) {
+      this._routineOverrides.set(attributes.child_id, this._config.routine);
+    }
+    const originalSize = attributes.card_size;
+    const size = this._config.size || "inherit";
+    const stateForCard = {
+      ...state,
+      attributes: {
+        ...attributes,
+        card_size: size === "inherit" ? originalSize : size,
+      },
+    };
+    this._body.textContent = "";
+    this._page.append(this.renderChild(stateForCard, morning, this._hass.connected !== false, autoRoutine));
+  }
+}
+
 class BedtimeCalendarCard extends BedtimeCard {
+  static cardType = "bedtime-sticker-calendar";
+
+  static getStubConfig() { return {type: `custom:${this.cardType}`}; }
+
   constructor() {
     super();
     this._selectedDay = null;
@@ -858,20 +931,119 @@ class BedtimeParentCard extends BedtimeCard {
 }
 
 class BedtimeCardEditor extends HTMLElement {
-  setConfig(config) { this._config = config || {}; }
-  set hass(hass) { this._hass = hass; }
-  connectedCallback() {
-    if (this._built) return;
-    this._built = true;
-    const field = document.createElement("ha-selector");
-    field.selector = {text: {}}
-    field.label = "Bedtime Sticker Club card settings are managed on the Parent Controls page.";
-    this.append(field);
+  constructor() {
+    super();
+    this.attachShadow({mode: "open"});
   }
+
+  setConfig(config) {
+    this._config = {...(config || {})};
+    this.render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this.render();
+  }
+
+  element(tag, label, value) {
+    const node = document.createElement(tag);
+    if (label) node.textContent = label;
+    if (value !== undefined) node.value = value;
+    return node;
+  }
+
+  addField(container, labelText, field) {
+    const label = this.element("label", labelText);
+    label.append(field);
+    container.append(label);
+  }
+
+  select(options, value, onChange, multiple = false) {
+    const control = this.element("select");
+    control.multiple = multiple;
+    for (const [optionValue, labelText] of options) {
+      const option = this.element("option", labelText, optionValue);
+      option.value = optionValue;
+      option.selected = multiple ? value.includes(optionValue) : optionValue === value;
+      control.append(option);
+    }
+    control.addEventListener("change", onChange);
+    return control;
+  }
+
+  changed(patch) {
+    this._config = {...this._config, ...patch};
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: {config: this._config}, bubbles: true, composed: true,
+    }));
+  }
+
+  render() {
+    if (!this._hass || !this.cardType) return;
+    this.shadowRoot.replaceChildren();
+    const style = document.createElement("style");
+    style.textContent = "label {display:grid;gap:8px;margin:12px 0} input,select {min-height:42px;padding:8px;font:inherit} p {color:var(--secondary-text-color)}";
+    this.shadowRoot.append(style);
+    const body = document.createElement("section");
+    if (this.cardType === "bedtime-sticker-child-card") {
+      const profiles = Object.values(this._hass.states)
+        .filter((state) => state.attributes.routine === "bedtime"
+          && state.entity_id.startsWith("sensor.bedtime_"))
+        .sort((a, b) => a.attributes.display_order - b.attributes.display_order);
+      const options = profiles.map((state) => [state.attributes.child_id, state.attributes.child_name]);
+      const child = this.select(options, this._config.child_id || options[0]?.[0], (event) => {
+        this.changed({child_id: event.target.value});
+      });
+      this.addField(body, "Child", child);
+      this.addField(body, "Routine", this.select(
+        [["auto", "Automatic"], ["morning", "Morning"], ["bedtime", "Bedtime"]],
+        this._config.routine || "auto",
+        (event) => this.changed({routine: event.target.value}),
+      ));
+      this.addField(body, "Size", this.select(
+        [["inherit", "Use child size"], ["compact", "Compact"], ["standard", "Standard"], ["large", "Large"]],
+        this._config.size || "inherit",
+        (event) => this.changed({size: event.target.value}),
+      ));
+      this.addField(body, "Calendar", this.select(
+        [["collapsible", "Expandable"], ["hidden", "Hidden"]],
+        this._config.calendar || "collapsible",
+        (event) => this.changed({calendar: event.target.value}),
+      ));
+      if (!options.length) body.append(this.element("p", "Add a child profile before configuring a checklist card."));
+    } else if (this.cardType === "bedtime-sticker-calendar") {
+      const profiles = Object.values(this._hass.states)
+        .filter((state) => state.attributes.routine === "bedtime"
+          && state.entity_id.startsWith("sensor.bedtime_"))
+        .sort((a, b) => a.attributes.display_order - b.attributes.display_order);
+      const activeIds = profiles.filter((state) => !state.attributes.archived)
+        .map((state) => state.attributes.child_id);
+      const value = this._config.child_ids || activeIds;
+      const select = this.select(profiles.map((state) => [
+        state.attributes.child_id,
+        `${state.attributes.child_name}${state.attributes.archived ? " (archived)" : ""}`,
+      ]), value, (event) => {
+        const selected = [...event.target.selectedOptions].map((option) => option.value);
+        const patch = selected.length === activeIds.length
+          && activeIds.every((id) => selected.includes(id))
+          ? {child_ids: undefined}
+          : {child_ids: selected};
+        this.changed(patch);
+      }, true);
+      select.size = Math.min(Math.max(profiles.length, 3), 8);
+      this.addField(body, "Children (select one or more; blank means all active children)", select);
+    } else {
+      body.append(this.element("p", "Shows the live family checklist for every active child."));
+    }
+    this.shadowRoot.append(body);
+  }
+
   async getConfig() { return this._config || {}; }
 }
 
 customElements.define("bedtime-sticker-family", BedtimeFamilyCard);
+customElements.define("bedtime-sticker-child-card", BedtimeChildChecklistCard);
 customElements.define("bedtime-sticker-parent-controls", BedtimeParentCard);
 customElements.define("bedtime-card-editor", BedtimeCardEditor);
 window.customCards = window.customCards || [];
@@ -879,6 +1051,12 @@ window.customCards.push({
   type: "bedtime-sticker-family",
   name: "Bedtime Sticker Club family dashboard",
   description: "The family's bedtime checklists and stickers.",
+  preview: true,
+});
+window.customCards.push({
+  type: "bedtime-sticker-child-card",
+  name: "Bedtime Sticker Club child checklist",
+  description: "A configurable morning or bedtime checklist for one child.",
   preview: true,
 });
 customElements.define("bedtime-sticker-calendar", BedtimeCalendarCard);

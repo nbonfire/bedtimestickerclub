@@ -50,6 +50,7 @@ def main():
     frontend = (COMPONENT / "frontend/bedtime-sticker-club.js").read_text()
     assert 'type: "bedtime-sticker-calendar"' in frontend
     assert 'type: "bedtime-sticker-family"' in frontend
+    assert 'type: "bedtime-sticker-child-card"' in frontend
     assert 'calendarOpen ? "Hide" : "Show"' in frontend
     assert "custom:bedtime-sticker-calendar" not in dashboard
     assert "child_ids" in frontend
