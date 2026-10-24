@@ -59,9 +59,10 @@ class BedtimeCard extends HTMLElement {
       .child.size-compact .name { font-size:20px }
       .child.size-large .name { font-size:28px }
       .identity { display:flex; align-items:center; gap:12px; min-width:0 }
-      .avatar { width:56px; height:56px; flex:none; display:grid; place-items:center;
-        border:0; border-radius:18px; color:inherit; background:var(--tint,#f0e6ff);
-        font-size:36px; cursor:pointer }
+      .avatar { box-sizing:border-box; width:58px; height:58px; min-width:58px; min-height:58px;
+        flex:none; display:grid; place-items:center; padding:0; border:0; overflow:hidden;
+        border-radius:20px; color:inherit; background:var(--tint,#f0e6ff); font-size:37px;
+        line-height:1; text-align:center; cursor:pointer }
       .avatar:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid #222; outline-offset:2px }
       .name { font-size:24px; font-weight:850; overflow-wrap:anywhere }
       .muted { color:var(--muted); font-size:13px }
