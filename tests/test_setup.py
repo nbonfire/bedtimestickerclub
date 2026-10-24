@@ -54,6 +54,9 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["type"], "create_entry")
                 await hass.async_block_till_done()
                 entry = result["result"]
+                if entry.state == ConfigEntryState.NOT_LOADED:
+                    self.assertTrue(await hass.config_entries.async_setup(entry.entry_id))
+                    await hass.async_block_till_done()
                 self.assertEqual(entry.state, ConfigEntryState.LOADED)
                 self.assertTrue(frontend.async_panel_exists(hass, "bedtime-club"))
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_3").state, "7")
