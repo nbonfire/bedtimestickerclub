@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from aiohttp import web
-from aiohttp.test_utils import make_mocked_request
 from PIL import Image
 from homeassistant.components import frontend
 from homeassistant.components.lovelace.const import LOVELACE_DATA
@@ -346,10 +345,11 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.hass.data.setdefault(DOMAIN, {})[self.entry.entry_id] = self.coordinator
         payload = BytesIO()
         Image.new("RGB", (256, 128), "orange").save(payload, format="PNG")
-        request = make_mocked_request(
-            "POST", "/api/bedtime_sticker_club/avatars/kid_1",
-            headers={"Content-Type": "image/png"},
-            app={"hass": self.hass}, payload=payload.getvalue(),
+        request = SimpleNamespace(
+            app={"hass": self.hass},
+            content_type="image/png",
+            content_length=len(payload.getvalue()),
+            content=SimpleNamespace(read=AsyncMock(return_value=payload.getvalue())),
         )
         view = ChildAvatarView()
         response = await view.post(request, "kid_1")
@@ -361,10 +361,11 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((image.format, image.size), ("WEBP", (512, 512)))
         self.assertEqual(self.coordinator.data["profiles"]["kid_1"]["avatar_image"], image_name)
 
-        bad_request = make_mocked_request(
-            "POST", "/api/bedtime_sticker_club/avatars/kid_1",
-            headers={"Content-Type": "image/png"},
-            app={"hass": self.hass}, payload=b"not an image",
+        bad_request = SimpleNamespace(
+            app={"hass": self.hass},
+            content_type="image/png",
+            content_length=len(b"not an image"),
+            content=SimpleNamespace(read=AsyncMock(return_value=b"not an image")),
         )
         with self.assertRaises(web.HTTPBadRequest) as raised:
             await view.post(bad_request, "kid_1")
