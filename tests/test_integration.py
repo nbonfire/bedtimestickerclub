@@ -155,6 +155,20 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.child()["total"], 1)
         self.assertEqual(self.child()["morning_total"], 1)
 
+    async def test_parent_can_correct_a_morning_reward_without_changing_bedtime(self):
+        await self.coordinator.async_parent_control(
+            "set_reward", child_id="kid_1", routine="morning",
+            routine_date=routine_date(), earned=True, sticker="🌈",
+        )
+        self.assertEqual(self.child()["morning_total"], 1)
+        self.assertEqual(self.child()["total"], 0)
+        await self.coordinator.async_parent_control(
+            "correct_task", child_id="kid_1", routine="morning",
+            routine_date=routine_date(), task="get_dressed", completed=True,
+        )
+        self.assertEqual(self.child()["morning_total"], 0)
+        self.assertEqual(self.child()["total"], 0)
+
     async def test_auto_switch_is_configurable_and_manual_actions_stay_daily(self):
         self.now = datetime(2026, 10, 15, 11, 59, tzinfo=ZONE)
         self.assertEqual(self.coordinator.active_routine, "morning")

@@ -156,7 +156,10 @@ async def async_setup_entry(hass, entry):
 
     async def set_avatar(call):
         values = call.data
-        await coordinator.async_set_avatar(values["child_id"], values["avatar"])
+        old_image = await coordinator.async_set_avatar(values["child_id"], values["avatar"])
+        if isinstance(old_image, str) and old_image.startswith(f"{values['child_id']}-"):
+            old_path = Path(hass.config.path(DOMAIN, "avatars", old_image))
+            await hass.async_add_executor_job(old_path.unlink, missing_ok=True)
 
     common = {
         vol.Required("child_id"): cv.string,

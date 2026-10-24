@@ -77,6 +77,19 @@ class BedtimeCard extends HTMLElement {
       .stickers { display:grid; grid-template-columns:repeat(4,minmax(48px,1fr)); gap:7px; margin-top:8px }
       .stickers button { min-height:48px; padding:3px; text-align:center; font-size:26px }
       .stickers .chosen { border-color:var(--accent,#7541bf); background:var(--tint,#f0e6ff) }
+      .calendar-controls { display:flex; gap:8px; margin-top:10px }
+      .calendar { margin-top:10px; border-top:2px dashed #e7e2ed; padding-top:10px }
+      .calendar-title { display:flex; align-items:center; justify-content:space-between; margin:4px 0 10px;
+        font-weight:850 }
+      .calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px }
+      .weekday { text-align:center; color:var(--muted); font-size:11px; font-weight:800 }
+      .calendar-day { min-width:0; min-height:52px; display:grid; align-content:start; gap:3px;
+        padding:4px 2px; text-align:center; font-size:12px }
+      .calendar-day.selected { outline:3px solid var(--accent,#7541bf); outline-offset:1px }
+      .calendar-row { display:flex; justify-content:center; gap:1px; white-space:nowrap;
+        font-size:10px; line-height:1.2 }
+      .calendar-detail { margin-top:10px; padding:12px; border-radius:14px; background:#f6f3f8;
+        color:var(--ink); font-size:13px }
       .head-actions { display:flex; flex:none; gap:6px }
       .icon-button { width:48px; min-width:48px; padding:0; text-align:center; font-size:21px }
       .admin { display:grid; gap:12px; padding:16px; border-radius:18px; background:white }
@@ -142,6 +155,7 @@ class BedtimeCard extends HTMLElement {
     if (!this._hass) return;
     if (this.constructor === BedtimeFamilyCard) return this.renderFamily();
     if (this.constructor === BedtimeParentCard) return this.renderParents();
+    if (this.constructor === BedtimeCalendarCard) return this.renderCalendar();
   }
 
   async parent(action, data = {}) {
@@ -161,6 +175,8 @@ class BedtimeFamilyCard extends BedtimeCard {
     super();
     this._routineOverrides = new Map();
     this._avatarObjects = new Map();
+    this._expandedCalendars = new Set();
+    this._selectedCalendarDays = new Map();
   }
 
   renderFamily() {
@@ -292,6 +308,19 @@ class BedtimeFamilyCard extends BedtimeCard {
     }
     const total = routineAttributes.lifetime_total ?? selected.state;
     card.append(this.element("p", `🏆 ${total} ${routine}${Number(total) === 1 ? "" : "s"} completed`, "muted"));
+    const calendarOpen = this._expandedCalendars.has(attributes.child_id);
+    card.append(this.button(`${calendarOpen ? "Hide" : "Show"} sticker calendar`, () => {
+      if (calendarOpen) this._expandedCalendars.delete(attributes.child_id);
+      else this._expandedCalendars.add(attributes.child_id);
+      this.render();
+    }));
+    if (calendarOpen && morningState) {
+      card.append(renderCalendar(this, [{bedtime: state, morning: morningState}], attributes.month,
+        this._selectedCalendarDays.get(attributes.child_id), (day) => {
+          this._selectedCalendarDays.set(attributes.child_id, day);
+          this.render();
+        }));
+    }
     return card;
   }
 
@@ -395,6 +424,117 @@ class BedtimeFamilyCard extends BedtimeCard {
     this.shadowRoot.append(backdrop);
     custom.focus();
   }
+}
+
+class BedtimeCalendarCard extends BedtimeCard {
+  constructor() {
+    super();
+    this._selectedDay = null;
+  }
+
+  setConfig(config) {
+    super.setConfig(config);
+    if (config.child_ids !== undefined
+      && (!Array.isArray(config.child_ids) || !config.child_ids.every((id) => typeof id === "string"))) {
+      throw new Error("child_ids must be a list of child profile IDs.");
+    }
+  }
+
+  renderCalendar() {
+    this.shell("Family sticker calendar");
+    const states = Object.values(this._hass.states);
+    const selectedIds = this._config.child_ids;
+    const profiles = states
+      .filter((state) => state.entity_id.startsWith("sensor.bedtime_")
+        && state.attributes.routine === "bedtime"
+        && (selectedIds ? selectedIds.includes(state.attributes.child_id) : !state.attributes.archived))
+      .sort((a, b) => a.attributes.display_order - b.attributes.display_order)
+      .map((bedtime) => ({
+        bedtime,
+        morning: states.find((state) => state.attributes.child_id === bedtime.attributes.child_id
+          && state.attributes.routine === "morning"),
+      })).filter((profile) => profile.morning);
+    if (!profiles.length) {
+      this._body.textContent = "Choose an active child to show their sticker calendar.";
+      return;
+    }
+    const month = profiles[0].bedtime.attributes.month;
+    this._body.textContent = monthTitle(month);
+    this._page.append(renderCalendar(this, profiles, month, this._selectedDay, (day) => {
+      this._selectedDay = day;
+      this.render();
+    }));
+  }
+}
+
+function monthTitle(month) {
+  const [year, number] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, number - 1, 1)).toLocaleDateString("en-US", {
+    month: "long", year: "numeric", timeZone: "UTC",
+  });
+}
+
+function renderCalendar(owner, profiles, month, selectedDay, selectDay) {
+  const section = owner.element("section", undefined, "calendar");
+  section.append(owner.element("div", monthTitle(month), "calendar-title"));
+  const grid = owner.element("div", undefined, "calendar-grid");
+  for (const weekday of ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]) {
+    grid.append(owner.element("div", weekday, "weekday"));
+  }
+  const [year, monthNumber] = month.split("-").map(Number);
+  const firstWeekday = new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  for (let blank = 0; blank < firstWeekday; blank++) grid.append(document.createElement("span"));
+  for (let number = 1; number <= daysInMonth; number++) {
+    const day = `${month}-${String(number).padStart(2, "0")}`;
+    const button = owner.button(String(number), () => selectDay(day),
+      `calendar-day${selectedDay === day ? " selected" : ""}`);
+    const descriptions = [];
+    for (const profile of profiles) {
+      const {bedtime, morning} = profile;
+      const morningSticker = morning.attributes.stickers?.[day];
+      const bedtimeSticker = bedtime.attributes.stickers?.[day];
+      const description = `${bedtime.attributes.child_name}: morning `
+        + `${morningSticker?.earned ? morningSticker.emoji : "no sticker"}; bedtime `
+        + `${bedtimeSticker?.earned ? bedtimeSticker.emoji : "no sticker"}`;
+      descriptions.push(description);
+      const row = owner.element("span",
+        `${bedtime.attributes.avatar || "🙂"}${morningSticker?.earned ? morningSticker.emoji : "·"}`
+          + `${bedtimeSticker?.earned ? bedtimeSticker.emoji : "·"}`,
+        "calendar-row",
+      );
+      row.title = description;
+      row.setAttribute("aria-label", description);
+      button.append(row);
+    }
+    button.setAttribute("aria-label", `${day}. ${descriptions.join(". ")}`);
+    grid.append(button);
+  }
+  section.append(grid);
+  if (selectedDay) {
+    const details = owner.element("section", undefined, "calendar-detail");
+    details.append(owner.element("h3", `Sticker details · ${selectedDay}`));
+    let hasReward = false;
+    for (const {bedtime, morning} of profiles) {
+      const morningSticker = morning.attributes.stickers?.[selectedDay];
+      const bedtimeSticker = bedtime.attributes.stickers?.[selectedDay];
+      hasReward ||= Boolean(morningSticker?.earned || bedtimeSticker?.earned);
+      details.append(owner.element("p",
+        `${bedtime.attributes.avatar || "🙂"} ${bedtime.attributes.child_name}: `
+        + `morning ${morningSticker?.earned ? morningSticker.emoji : "no sticker"}; `
+        + `bedtime ${bedtimeSticker?.earned ? bedtimeSticker.emoji : "no sticker"}.`,
+      ));
+    }
+    if (!hasReward) details.append(owner.element("p", "No stickers were earned on this day."));
+    if (owner._hass.user?.is_admin && selectedDay <= profiles[0].bedtime.attributes.routine_date) {
+      details.append(owner.button("Correct this day", () => {
+        window.history.pushState(null, "", `/bedtime-club/parents?routine_date=${encodeURIComponent(selectedDay)}`);
+        window.dispatchEvent(new Event("location-changed"));
+      }));
+    }
+    section.append(details);
+  }
+  return section;
 }
 
 class BedtimeParentCard extends BedtimeCard {
@@ -655,6 +795,11 @@ class BedtimeParentCard extends BedtimeCard {
   renderCorrections(data) {
     const section = this.element("section", undefined, "admin");
     section.append(this.element("h2", "This month’s corrections"));
+    const requestedDate = new URL(window.location.href).searchParams.get("routine_date");
+    if (requestedDate && requestedDate !== this._parentRequestedDate) {
+      this._parentRequestedDate = requestedDate;
+      this._correctionDay = requestedDate;
+    }
     this._correctionDay ||= data.today;
     const date = this.input(this._correctionDay, "date", "Routine day to correct");
     date.max = data.today;
@@ -734,5 +879,12 @@ window.customCards.push({
   type: "bedtime-sticker-family",
   name: "Bedtime Sticker Club family dashboard",
   description: "The family's bedtime checklists and stickers.",
+  preview: true,
+});
+customElements.define("bedtime-sticker-calendar", BedtimeCalendarCard);
+window.customCards.push({
+  type: "bedtime-sticker-calendar",
+  name: "Bedtime Sticker Club calendar",
+  description: "A shared morning and bedtime sticker calendar for selected children.",
   preview: true,
 });

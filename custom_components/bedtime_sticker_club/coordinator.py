@@ -702,9 +702,11 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             if not isinstance(avatar, str) or not 1 <= len(avatar) <= 16:
                 raise ServiceValidationError("Choose a valid emoji avatar.")
             data = deepcopy(self.data)
+            old_image = data["profiles"][child_id].get("avatar_image")
             data["profiles"][child_id]["avatar"] = avatar
             data["profiles"][child_id]["avatar_image"] = None
             await self._commit(data)
+            return old_image
 
     async def async_set_avatar_image(self, child_id, image_name):
         """Persist the generated integration-local image filename."""

@@ -1,8 +1,8 @@
 # Bedtime Sticker Club
 
-A shared-tablet Home Assistant dashboard for a family. Each child checks off
-getting ready for the morning and completing a bedtime routine.
-Completing all three earns a sticker on their monthly calendar.
+A shared-tablet Home Assistant dashboard for a family. Children complete
+independent morning and bedtime checklists, earn separate daily stickers, and
+see their routine-month stickers in child and shared family calendars.
 
 ![Tablet dashboard with independent progress and a chosen rocket sticker](docs/bedtime-tablet.png)
 
@@ -70,6 +70,11 @@ For a personal YAML dashboard, include the native family card:
 ```yaml
 type: custom:bedtime-sticker-family
 ```
+
+Add a shared sticker calendar to another dashboard with
+`type: custom:bedtime-sticker-calendar`. Optionally set `child_ids` to a list
+of child profile IDs; without it, the calendar shows all active children.
+Each month cell lists the selected children's morning and bedtime stickers.
 
 Add the card through Home Assistant's card picker after downloading the
 integration. Keep child profile IDs and entity IDs stable in any child-specific
