@@ -28,6 +28,11 @@ def routine_date():
     return (now.date() - timedelta(days=now.hour < 4)).isoformat()
 
 
+def task_defaults_key(routine):
+    """Return the persisted shared-task key, retaining the legacy bedtime key."""
+    return "default_tasks" if routine == "bedtime" else "default_morning_tasks"
+
+
 def empty_data():
     return {
         "schema_version": 3,
@@ -79,7 +84,7 @@ def reconcile(data, day):
             required = daily.setdefault(
                 required_key,
                 profile.get("task_overrides", {}).get(routine)
-                or data[f"default_{routine}_tasks"],
+                or data[task_defaults_key(routine)],
             )
             task_state = daily["tasks"].setdefault(routine, {
                 task["id"]: child[dates_key].get(task["id"]) == day
@@ -113,7 +118,7 @@ def install_task_snapshot(data, child_id, day, task_list, routine="bedtime"):
     required_key = "required_tasks" if routine == "bedtime" else "morning_required_tasks"
     dates_key = "task_dates" if routine == "bedtime" else "morning_task_dates"
     stickers_key = "stickers" if routine == "bedtime" else "morning_stickers"
-    previous = daily.get(required_key, data[f"default_{routine}_tasks"])
+    previous = daily.get(required_key, data[task_defaults_key(routine)])
     state = daily["tasks"].setdefault(routine, {
         task["id"]: child[dates_key].get(task["id"]) == day
         for task in previous
@@ -244,7 +249,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             return deepcopy(snapshot)
         profile = self.data["profiles"][child_id]
         override = profile.get("task_overrides", {}).get(routine)
-        return deepcopy(override if override is not None else self.data[f"default_{routine}_tasks"])
+        return deepcopy(override if override is not None else self.data[task_defaults_key(routine)])
 
     @staticmethod
     def profile_ids_from(profiles):
@@ -536,7 +541,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 routine = values.get("routine", "bedtime")
                 if routine not in ROUTINES:
                     raise ServiceValidationError("Choose the morning or bedtime routine.")
-                default_key = f"default_{routine}_tasks"
+                default_key = task_defaults_key(routine)
                 data[default_key] = self._validate_task_list(values.get("tasks"))
                 await self._apply_task_list_change(
                     data, "", data[default_key], values.get("effective_day", "tomorrow"), today, routine,
@@ -550,7 +555,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 profiles[child_id]["task_overrides"][routine] = (
                     None if override is None else self._validate_task_list(override)
                 )
-                chosen = profiles[child_id]["task_overrides"][routine] or data[f"default_{routine}_tasks"]
+                chosen = profiles[child_id]["task_overrides"][routine] or data[task_defaults_key(routine)]
                 await self._apply_task_list_change(data, child_id, chosen, effective, today, routine)
             elif action == "correct_task":
                 day, task_id, completed = values.get("routine_date"), values.get("task"), values.get("completed")
@@ -632,7 +637,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
         profile = data["profiles"][child_id]
         return deepcopy(
             profile.get("task_overrides", {}).get(routine)
-            or data[f"default_{routine}_tasks"]
+            or data[task_defaults_key(routine)]
         )
 
     async def _apply_task_list_change(self, data, child_id, task_list, effective_day, today, routine="bedtime"):
