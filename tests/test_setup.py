@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.components import frontend
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er, restore_state
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                     "frontend": {}, "lovelace": {},
                 }, hass)
                 await hass.async_start()
+                self.assertTrue(await async_setup_component(hass, DOMAIN, {}))
                 # A disabled legacy template can leave an unavailable placeholder;
                 # migration must prefer the real saved state and reuse its ID.
                 registry = er.async_get(hass)
