@@ -48,6 +48,14 @@
         "routine_date": {"name": "Routine date", "description": "Date shown on the checklist."},
         "sticker": {"name": "Sticker", "description": "The emoji to save for this day."}
       }
+    },
+    "set_avatar": {
+      "name": "Set a child's avatar",
+      "description": "Set an active child's emoji avatar.",
+      "fields": {
+        "child_id": {"name": "Child", "description": "The child's stable profile identifier."},
+        "avatar": {"name": "Avatar", "description": "The emoji avatar to display."}
+      }
     }
   }
 }

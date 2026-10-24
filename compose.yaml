@@ -1,20 +1,8 @@
 name: bedtime-preview
 
 services:
-  button-card:
-    image: curlimages/curl:8.8.0
-    user: "0:0"
-    entrypoint: ["sh", "/setup/download-button-card.sh"]
-    volumes:
-      - ./.test-ha/www:/assets
-      - ./docker/download-button-card.sh:/setup/download-button-card.sh:ro
-    restart: "no"
-
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:2026.10.1
-    depends_on:
-      button-card:
-        condition: service_completed_successfully
     ports:
       - "${BEDTIME_BIND_ADDRESS:-127.0.0.1}:${BEDTIME_PORT:-18123}:8123"
     environment:

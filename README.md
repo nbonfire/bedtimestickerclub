@@ -1,6 +1,6 @@
 # Bedtime Sticker Club
 
-A shared-tablet Home Assistant dashboard for three kids. Each child checks off
+A shared-tablet Home Assistant dashboard for a family. Each child checks off
 clearing their plate, brushing their teeth, and choosing tomorrow's outfit.
 Completing all three earns a sticker on their monthly calendar.
 
@@ -8,33 +8,26 @@ Completing all three earns a sticker on their monthly calendar.
 
 ## Install with HACS
 
-Requires **Home Assistant 2026.10 or newer**, HACS, and **Button Card 7.x**.
+Requires **Home Assistant 2026.10 or newer** and HACS.
 
-1. Install [Button Card](https://github.com/custom-cards/button-card) through HACS.
-2. Open **HACS → ⋮ → Custom repositories**. Add
+1. Open **HACS → ⋮ → Custom repositories**. Add
    `https://github.com/nbonfire/bedtimestickerclub` with type **Integration**.
-3. Find **Bedtime Sticker Club**, download it, and restart Home Assistant.
-4. Open **Settings → Devices & services → Add integration**, search for
+2. Find **Bedtime Sticker Club**, download it, and restart Home Assistant.
+3. Open **Settings → Devices & services → Add integration**, search for
    **Bedtime Sticker Club**, and enter the three children's names.
-5. Open **Bedtime Sticker Club** from the sidebar, or visit
+4. Open **Bedtime Sticker Club** from the sidebar, or visit
    `/bedtime-club/tonight`.
 
 No package includes or dashboard YAML configuration are needed. HACS manages the
-integration files; the setup flow creates four sensors, two reminder-time
+integration files; the setup flow creates profile sensors, two reminder-time
 entities, the routine actions, and the dashboard. Only one instance is supported.
-
-Button Card is a separate dependency. Its JavaScript module should appear in
-**Settings → Dashboards → Resources** as
-`/hacsfiles/button-card/button-card.js`. Enable Advanced Mode in your profile if
-Resources is hidden. If your instance manages resources in YAML, add it to your
-existing `lovelace.resources` list with `type: module`.
 
 ### Manual installation
 
 Extract a release ZIP into `/config/`, or copy the entire
 `custom_components/bedtime_sticker_club/` folder into
-`/config/custom_components/bedtime_sticker_club/`. Install Button Card, restart,
-and follow the **Add integration** steps above.
+`/config/custom_components/bedtime_sticker_club/`, restart, and follow the
+**Add integration** steps above.
 
 ### Updates and removal
 
@@ -48,37 +41,30 @@ retained, so adding it again restores the same progress.
 
 ## Make it yours
 
-Change the children's names with **Configure** on the integration in
-**Settings → Devices & services**. Names update on the dashboard immediately.
-The internal child IDs remain `kid_1`, `kid_2`, and `kid_3` so renaming a child
-keeps their stickers.
+Edit children's names, task lists, ordering, and archive status in Parent
+Controls. Existing `kid_1`, `kid_2`, and `kid_3` IDs stay stable; newly added
+children receive stable IDs so renaming or archiving a child preserves stickers.
 
-The gear at the top opens **Parent settings**, also available at
-`/bedtime-club/parents`. Dinner defaults to **6 pm** and bedtime to **7 pm**.
-Set dinner before bedtime, with both times at or after 4 am. These settings
-highlight upcoming tasks; they do not send notifications or lock the checklist.
-The parent page is a convenience, not an access-control boundary.
+The gear at the top opens **Parent Controls**, also available at
+`/bedtime-club/parents`. Only Home Assistant administrators can change child
+profiles, tasks, schedules, or rewards. Children share the tablet dashboard but
+cannot open Parent Controls or change schedules through reminder-time entities.
+Dinner defaults to **6 pm** and bedtime to **7 pm**. Set dinner before bedtime,
+with both times at or after 4 am.
 
-For custom avatars, colors, or layout, copy
-`/config/custom_components/bedtime_sticker_club/dashboard.yaml` to
-`/config/dashboards/bedtime.yaml`. Edit that copy and register it under the same
-URL, merging this into your existing `lovelace` configuration:
+For a personal dashboard, add **Bedtime Sticker Club family dashboard** as a
+card in your own dashboard. Its card includes the family checklists; the bundled
+sidebar dashboard remains available for Parent Controls.
+
+For a personal YAML dashboard, include the native family card:
 
 ```yaml
-lovelace:
-  dashboards:
-    bedtime-club:
-      mode: yaml
-      title: Bedtime Sticker Club
-      icon: mdi:star-face
-      show_in_sidebar: true
-      filename: dashboards/bedtime.yaml
+type: custom:bedtime-sticker-family
 ```
 
-Restart once after adding this registration. The integration respects an existing
-`bedtime-club` dashboard. Your copy stays intact across HACS updates; merge future
-layout improvements into it manually. Keep `child_id` and the entity IDs stable.
-The bundled dashboard uses names from the integration's settings.
+Add the card through Home Assistant's card picker after downloading the
+integration. Keep child profile IDs and entity IDs stable in any child-specific
+dashboard cards.
 
 ## How it behaves
 
@@ -129,8 +115,9 @@ If you retain a personal dashboard, update its action names from
 `script.bedtime_choose_sticker` to `bedtime_sticker_club.choose_sticker`. Change
 its schedule entities from `input_datetime.bedtime_dinner_time` and
 `input_datetime.bedtime_bedtime_time` to `time.bedtime_dinner_time` and
-`time.bedtime_bedtime_time`. The service fields and child sensor attributes remain
-compatible. The original YAML files in `packages/` and `dashboards/` are retained
+`time.bedtime_bedtime_time`; those time entities are read-only, so use Parent
+Controls for schedule changes. The service fields and child sensor attributes
+remain compatible. The original YAML files in `packages/` and `dashboards/` are retained
 as migration references and regression fixtures; HACS does not install them.
 
 ## Storage and actions
@@ -164,10 +151,9 @@ Sticker Club**. Existing accounts and progress in the ignored `.test-ha/`
 directory are reused. Old YAML preview progress is imported when adding the
 integration after restarting with the new configuration.
 
-Compose runs Home Assistant **2026.10.1**, downloads and verifies Button Card
-**7.0.1**, and mounts the integration directly. HACS is not required in this
-preview. Refresh after editing the bundled dashboard; restart after Python or
-configuration changes:
+Compose runs Home Assistant **2026.10.1** and mounts the integration directly.
+HACS is not required in this preview. Refresh after editing the bundled
+dashboard; restart after Python or configuration changes:
 
 ```sh
 docker compose restart homeassistant

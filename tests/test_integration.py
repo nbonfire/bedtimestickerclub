@@ -2,7 +2,7 @@
 
 import asyncio
 from copy import deepcopy
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -15,12 +15,16 @@ from homeassistant.components import frontend
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
-from homeassistant.exceptions import ConfigEntryError, ServiceValidationError
+from homeassistant.exceptions import ConfigEntryError, HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import restore_state
 from homeassistant.util import dt as dt_util
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from custom_components.bedtime_sticker_club import register_dashboard
+from custom_components.bedtime_sticker_club import (
+    async_handle_parent_action,
+    register_dashboard,
+    require_parent_admin,
+)
 from custom_components.bedtime_sticker_club.const import DOMAIN, TASKS
 from custom_components.bedtime_sticker_club.coordinator import BedtimeCoordinator, routine_date
 
@@ -61,6 +65,25 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     def child(self, child="kid_1"):
         return self.coordinator.data["children"][child]
+
+    async def test_parent_api_requires_home_assistant_administrator(self):
+        admin_connection = SimpleNamespace(user=SimpleNamespace(is_admin=True))
+        child_connection = SimpleNamespace(user=SimpleNamespace(is_admin=False))
+        require_parent_admin(admin_connection)
+        with self.assertRaises(HomeAssistantError):
+            require_parent_admin(child_connection)
+        self.hass.data.setdefault(DOMAIN, {})[self.entry.entry_id] = self.coordinator
+        request = {"action": "profile_create", "data": {"name": "Taylor"}}
+        with self.assertRaises(HomeAssistantError):
+            await async_handle_parent_action(
+                self.hass, child_connection, self.entry.entry_id,
+                request["action"], request["data"],
+            )
+        profile_id = await async_handle_parent_action(
+            self.hass, admin_connection, self.entry.entry_id,
+            request["action"], request["data"],
+        )
+        self.assertEqual(self.coordinator.data["profiles"][profile_id]["name"], "Taylor")
 
     async def test_independent_progress_and_duplicate_awards(self):
         await self.finish()
@@ -170,6 +193,26 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Do not leave fake restore objects for HA shutdown to serialize.
         restore.last_states.clear()
 
+    async def test_schema_one_data_migrates_without_changing_bedtime_totals(self):
+        legacy = {
+            "schema_version": 1,
+            "dinner_time": "17:45:00",
+            "bedtime_time": "20:00:00",
+            "children": {
+                "kid_1": {
+                    "total": 12, "month": "2026-10",
+                    "stickers": {"2026-10-15": {"emoji": "🚀", "earned": True}},
+                    "task_dates": {"plate": "2026-10-15"},
+                },
+            },
+        }
+        upgraded = self.coordinator._upgrade(legacy)
+        self.assertEqual(upgraded["schema_version"], 2)
+        self.assertEqual(upgraded["children"]["kid_1"]["total"], 12)
+        self.assertEqual(upgraded["children"]["kid_1"]["stickers"]["2026-10-15"]["emoji"], "🚀")
+        self.assertEqual(upgraded["profiles"]["kid_1"]["name"], "Alex")
+        self.assertEqual(upgraded["children"]["kid_1"]["morning_total"], 0)
+
     async def test_registers_dashboard_and_preserves_existing_copy(self):
         self.hass.data[LOVELACE_DATA] = SimpleNamespace(dashboards={})
         dashboard = register_dashboard(self.hass)
@@ -177,6 +220,70 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([v["path"] for v in data["views"]], ["tonight", "parents"])
         self.assertIsNone(register_dashboard(self.hass))
         self.assertIs(self.hass.data[LOVELACE_DATA].dashboards["bedtime-club"], dashboard)
+
+    async def test_creates_archives_orders_and_restores_children(self):
+        await self.coordinator.async_parent_control("profile_create", name="Robin")
+        profile_id = self.coordinator.profile_ids()[-1]
+        self.assertTrue(profile_id.startswith("child_"))
+        self.assertEqual(self.coordinator.child_attributes(profile_id)["child_name"], "Robin")
+        await self.coordinator.async_parent_control("profile_move", child_id=profile_id, position=0)
+        self.assertEqual(self.coordinator.profile_ids()[0], profile_id)
+        await self.coordinator.async_parent_control("profile_archive", child_id=profile_id)
+        self.assertNotIn(profile_id, self.coordinator.profile_ids(active=True))
+        with self.assertRaises(ServiceValidationError):
+            await self.task("plate", child=profile_id)
+        await self.coordinator.async_parent_control("profile_restore", child_id=profile_id)
+        self.assertIn(profile_id, self.coordinator.profile_ids(active=True))
+
+    async def test_task_defaults_preserve_custom_lists_and_can_be_reset(self):
+        custom = [
+            {"id": "read", "label": "Read together", "icon": "📚"},
+            {"id": "pack", "label": "Pack a bag", "icon": "🎒"},
+        ]
+        await self.coordinator.async_parent_control(
+            "child_tasks", child_id="kid_1", tasks=custom, effective_day="today",
+        )
+        new_default = deepcopy(self.coordinator.data["default_tasks"])
+        new_default.append({"id": "shoes", "label": "Find shoes", "icon": "👟"})
+        await self.coordinator.async_parent_control(
+            "default_tasks", child_id="", tasks=new_default, effective_day="today",
+        )
+        self.assertEqual(self.coordinator.tasks_for("kid_1"), custom)
+        self.assertEqual(self.coordinator.tasks_for("kid_2"), new_default)
+        await self.coordinator.async_parent_control(
+            "child_tasks", child_id="kid_1", tasks=None, effective_day="tomorrow",
+        )
+        self.assertEqual(self.coordinator.tasks_for("kid_1"), custom)
+        self.now += timedelta(days=1)
+        await self.coordinator.async_tick()
+        self.assertEqual(self.coordinator.tasks_for("kid_1"), new_default)
+
+    async def test_parent_overrides_hold_until_a_real_task_change(self):
+        day = routine_date()
+        await self.coordinator.async_parent_control(
+            "set_reward", child_id="kid_1", routine_date=day, earned=True, sticker="🚀",
+        )
+        self.assertEqual(self.child()["total"], 1)
+        await self.task("plate", completed=False)
+        self.assertEqual(self.child()["total"], 1)
+        await self.task("plate", completed=True)
+        self.assertEqual(self.child()["total"], 0)
+        await self.task("teeth")
+        await self.task("outfit")
+        self.assertEqual(self.child()["total"], 1)
+
+    async def test_admin_corrections_reject_future_and_previous_month(self):
+        with self.assertRaises(ServiceValidationError):
+            await self.coordinator.async_parent_control(
+                "set_reward", child_id="kid_1", routine_date="2026-11-01",
+                earned=True, sticker="⭐",
+            )
+        with self.assertRaises(ServiceValidationError):
+            await self.coordinator.async_parent_control(
+                "set_reward", child_id="kid_1", routine_date="2026-09-30",
+                earned=True, sticker="⭐",
+            )
+        self.assertEqual(self.child()["total"], 0)
 
     async def test_refuses_to_overwrite_unrelated_panel(self):
         self.hass.data[LOVELACE_DATA] = SimpleNamespace(dashboards={})

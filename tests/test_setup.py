@@ -4,12 +4,14 @@ from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from homeassistant import bootstrap, loader
 from homeassistant.core import HomeAssistant, State
 from homeassistant.components import frontend
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er, restore_state
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,10 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                     "frontend": {}, "lovelace": {},
                 }, hass)
                 await hass.async_start()
+                from homeassistant import setup
+                with patch.object(setup, "_log_error_setup_error") as log_setup_error:
+                    initialized = await async_setup_component(hass, DOMAIN, {})
+                self.assertTrue(initialized, f"component setup errors: {log_setup_error.call_args_list}")
                 # A disabled legacy template can leave an unavailable placeholder;
                 # migration must prefer the real saved state and reuse its ID.
                 registry = er.async_get(hass)
@@ -54,6 +60,14 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["type"], "create_entry")
                 await hass.async_block_till_done()
                 entry = result["result"]
+                if entry.state == ConfigEntryState.NOT_LOADED:
+                    self.assertTrue(
+                        await hass.config_entries.async_setup(entry.entry_id),
+                        f"Config entry did not load; state={entry.state}, "
+                        f"disabled_by={entry.disabled_by}, "
+                        f"components={sorted(hass.config.components)}",
+                    )
+                await hass.async_block_till_done()
                 self.assertEqual(entry.state, ConfigEntryState.LOADED)
                 self.assertTrue(frontend.async_panel_exists(hass, "bedtime-club"))
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_3").state, "7")
@@ -71,9 +85,17 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 }, blocking=True)
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_1").state, "1")
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_1").attributes["stickers"][day]["emoji"], "🚀")
-                await hass.services.async_call("time", "set_value", {
-                    "entity_id": "time.bedtime_dinner_time", "time": "17:30:00",
-                }, blocking=True)
+                # Entity-targeted writes are closed; schedule changes go through
+                # the administrator-only Parent Controls websocket.
+                from homeassistant.exceptions import HomeAssistantError
+                with self.assertRaises(HomeAssistantError):
+                    await hass.services.async_call("time", "set_value", {
+                        "entity_id": "time.bedtime_dinner_time", "time": "17:30:00",
+                    }, blocking=True)
+                self.assertEqual(hass.states.get("time.bedtime_dinner_time").state, "18:00:00")
+                await entry.runtime_data.async_parent_control(
+                    "schedule", schedule={"dinner_time": "17:30:00"},
+                )
                 self.assertEqual(hass.states.get("time.bedtime_dinner_time").state, "17:30:00")
                 duplicate = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
                 self.assertEqual(duplicate["reason"], "already_configured")
