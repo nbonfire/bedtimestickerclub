@@ -139,11 +139,25 @@ class BedtimeCard extends HTMLElement {
 }
 
 class BedtimeFamilyCard extends BedtimeCard {
+  constructor() {
+    super();
+    this._routineOverrides = new Map();
+  }
+
   renderFamily() {
     this.shell("Bedtime Sticker Club 🌟");
     const connected = this._hass.connected !== false && this._hass.connection?.connected !== false;
+    const routineEntity = this._hass.states["sensor.bedtime_routine"];
+    const day = routineEntity?.attributes.routine_date;
+    if (day && day !== this._routineDay) {
+      this._routineOverrides.clear();
+      this._routineDay = day;
+    }
+    const automaticRoutine = routineEntity?.attributes.active_routine || "bedtime";
     const message = this.element("p", connected
-      ? "Tonight’s routine · Three little tasks, one happy sticker."
+      ? automaticRoutine === "morning"
+        ? "Before school · Four little tasks to start the day."
+        : "Tonight’s routine · Three little tasks, one happy sticker."
       : "Connection lost. Your saved stickers are safe. Reconnecting…", "sub");
     const actions = this.shadowRoot.querySelector("header");
     if (this._hass.user?.is_admin) {
@@ -159,18 +173,27 @@ class BedtimeFamilyCard extends BedtimeCard {
     const profiles = Object.values(this._hass.states)
       .filter((state) => state.entity_id.startsWith("sensor.bedtime_")
         && state.entity_id !== "sensor.bedtime_routine"
+        && state.attributes.routine === "bedtime"
         && !state.attributes.archived)
       .sort((a, b) => a.attributes.display_order - b.attributes.display_order);
     if (!profiles.length) {
       grid.append(this.element("p", "Add a child in Parent Controls to create their checklist."));
     }
-    for (const state of profiles) grid.append(this.renderChild(state, connected));
+    for (const state of profiles) {
+      const childId = state.attributes.child_id;
+      const morning = Object.values(this._hass.states).find((candidate) =>
+        candidate.attributes.child_id === childId && candidate.attributes.routine === "morning");
+      grid.append(this.renderChild(state, morning, connected, automaticRoutine));
+    }
     this._page.append(grid);
     if (this._error) this._page.append(this.element("p", this._error, "error"));
   }
 
-  renderChild(state, connected) {
+  renderChild(state, morningState, connected, automaticRoutine) {
     const attributes = state.attributes;
+    const routine = this._routineOverrides.get(attributes.child_id) || automaticRoutine;
+    const selected = routine === "morning" && morningState ? morningState : state;
+    const routineAttributes = selected.attributes;
     const card = this.element("article", undefined, "child");
     card.style.setProperty("--accent", attributes.accent || "#7541bf");
     card.style.setProperty("--tint", attributes.tint || "#f0e6ff");
@@ -183,20 +206,31 @@ class BedtimeFamilyCard extends BedtimeCard {
     identity.append(avatar);
     const name = this.element("div");
     name.append(this.element("div", attributes.child_name, "name"));
-    name.append(this.element("div", "My bedtime checklist", "muted"));
+    name.append(this.element("div", `My ${routineAttributes.routine} checklist`, "muted"));
     identity.append(name);
     card.append(identity);
-    const definitions = attributes.task_definitions || [];
-    const completed = Number(attributes.completed || 0);
+    if (morningState) {
+      const toggle = this.button(
+        `Switch to ${routine === "morning" ? "bedtime" : "morning"}`,
+        () => {
+          this._routineOverrides.set(attributes.child_id, routine === "morning" ? "bedtime" : "morning");
+          this.render();
+        },
+      );
+      card.append(toggle);
+    }
+    const definitions = routineAttributes.task_definitions || [];
+    const completed = Number(routineAttributes.completed || 0);
     card.append(this.element("p", `${completed} of ${definitions.length} done`, "muted"));
     const tasks = this.element("div", undefined, "tasklist");
     for (const task of definitions) {
-      const done = Boolean(attributes.tasks?.[task.id]);
+      const done = Boolean(routineAttributes.tasks?.[task.id]);
       const button = this.button("", () => this.call("set_task", {
         child_id: attributes.child_id,
         task: task.id,
         completed: !done,
-        routine_date: attributes.routine_date,
+        routine_date: routineAttributes.routine_date,
+        routine,
       }), `${done ? "done " : ""}row`);
       button.disabled = !connected || state.state === "unavailable";
       button.append(this.element("span", task.icon || "✓"));
@@ -205,14 +239,15 @@ class BedtimeFamilyCard extends BedtimeCard {
       tasks.append(button);
     }
     card.append(tasks);
-    const award = attributes.stickers?.[attributes.routine_date];
-    if (attributes.earned || award?.earned) {
+    const award = routineAttributes.stickers?.[routineAttributes.routine_date];
+    if (routineAttributes.earned || award?.earned) {
       card.append(this.element("p", "You earned a sticker! Pick your favorite ↓", "sticker"));
       const picker = this.element("div", undefined, "stickers");
       for (const sticker of STICKERS) {
         const button = this.button(sticker, () => this.call("choose_sticker", {
           child_id: attributes.child_id,
-          routine_date: attributes.routine_date,
+          routine_date: routineAttributes.routine_date,
+          routine,
           sticker,
         }), award?.emoji === sticker ? "chosen" : "");
         button.disabled = !connected;
@@ -221,7 +256,8 @@ class BedtimeFamilyCard extends BedtimeCard {
       }
       card.append(picker);
     }
-    card.append(this.element("p", `🏆 ${attributes.lifetime_total ?? state.state} bedtime${(attributes.lifetime_total ?? Number(state.state)) === 1 ? "" : "s"} completed`, "muted"));
+    const total = routineAttributes.lifetime_total ?? selected.state;
+    card.append(this.element("p", `🏆 ${total} ${routine}${Number(total) === 1 ? "" : "s"} completed`, "muted"));
     return card;
   }
 }
@@ -384,6 +420,56 @@ class BedtimeParentCard extends BedtimeCard {
       }
     }
     this._page.append(section);
+    this.renderMorningTasks(data);
+  }
+
+  renderMorningTasks(data) {
+    const section = this.element("section", undefined, "admin");
+    section.append(this.element("h2", "Shared morning tasks"));
+    const draft = this._drafts.get("default:morning")
+      || structuredClone(data.default_morning_tasks || []);
+    this._drafts.set("default:morning", draft);
+    for (const row of this.taskRows(draft, "default:morning")) section.append(row);
+    const controls = this.element("div", undefined, "toolbar");
+    controls.append(this.button("Add morning task", () => {
+      draft.push({id: `task_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, label: "New morning task", icon: "✓"});
+      this.render();
+    }));
+    const timing = this.effectiveDay();
+    controls.append(timing, this.button("Save morning defaults", () => this.save("default_tasks", {
+      routine: "morning", tasks: draft, effective_day: timing.value,
+    })));
+    section.append(controls);
+    for (const profile of data.profiles.filter((item) => item.active)) {
+      const customized = profile.task_overrides?.morning;
+      const key = `${profile.id}:morning`;
+      const override = this._drafts.get(key)
+        || (customized ? structuredClone(customized) : null);
+      if (customized) this._drafts.set(key, override);
+      section.append(this.element("h3", `${profile.name}’s morning tasks`));
+      section.append(this.button(customized ? "Reset to shared morning tasks" : "Customize morning tasks", () => {
+        if (customized) this.save("child_tasks", {
+          child_id: profile.id, routine: "morning", tasks: null, effective_day: "tomorrow",
+        });
+        else {
+          this._drafts.set(key, structuredClone(data.default_morning_tasks || []));
+          this.render();
+        }
+      }));
+      if (!override) continue;
+      for (const row of this.taskRows(override, key)) section.append(row);
+      const settings = this.element("div", undefined, "toolbar");
+      settings.append(this.button("Add child morning task", () => {
+        override.push({id: `task_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, label: "New morning task", icon: "✓"});
+        this.render();
+      }));
+      const effective = this.effectiveDay();
+      settings.append(effective, this.button("Save child morning tasks", () => this.save("child_tasks", {
+        child_id: profile.id, routine: "morning", tasks: override, effective_day: effective.value,
+      })));
+      section.append(settings);
+    }
+    this._page.append(section);
   }
 
   taskRows(tasks, key) {
@@ -442,41 +528,45 @@ class BedtimeParentCard extends BedtimeCard {
       const entry = this.element("details");
       const summary = this.element("summary", `${profile.name} · ${profile.active ? "active" : "archived"}`);
       entry.append(summary);
-      for (const task of this.tasksForProfile(profile, data)) {
-        const label = this.element("label", `${task.icon} ${task.label} `);
-        const checkbox = this.element("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = Boolean(daily?.tasks?.bedtime?.[task.id]);
-        checkbox.addEventListener("change", () => this.save("correct_task", {
-          child_id: profile.id, routine_date: date.value, task: task.id,
-          completed: checkbox.checked,
-        }));
-        label.append(checkbox);
-        entry.append(label);
+      for (const routine of ["bedtime", "morning"]) {
+        entry.append(this.element("h3", `${routine[0].toUpperCase()}${routine.slice(1)}`));
+        for (const task of this.tasksForProfile(profile, data, routine)) {
+          const label = this.element("label", `${task.icon} ${task.label} `);
+          const checkbox = this.element("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = Boolean(daily?.tasks?.[routine]?.[task.id]);
+          checkbox.addEventListener("change", () => this.save("correct_task", {
+            child_id: profile.id, routine, routine_date: date.value,
+            task: task.id, completed: checkbox.checked,
+          }));
+          label.append(checkbox);
+          entry.append(label);
+        }
+        const sticker = this.element("select");
+        for (const emoji of STICKERS) {
+          const option = this.element("option", emoji);
+          option.value = emoji;
+          sticker.append(option);
+        }
+        sticker.value = daily?.rewards?.[routine]?.emoji || "⭐";
+        const earned = this.element("input");
+        earned.type = "checkbox";
+        earned.checked = Boolean(daily?.rewards?.[routine]?.earned);
+        const awardLabel = this.element("label", ` Parent-set ${routine} sticker earned `);
+        awardLabel.append(earned);
+        entry.append(sticker, awardLabel, this.button(`Save ${routine} reward`, () => this.save("set_reward", {
+          child_id: profile.id, routine, routine_date: date.value,
+          sticker: sticker.value, earned: earned.checked,
+        })));
       }
-      const sticker = this.element("select");
-      for (const emoji of STICKERS) {
-        const option = this.element("option", emoji);
-        option.value = emoji;
-        sticker.append(option);
-      }
-      sticker.value = daily?.rewards?.bedtime?.emoji || "⭐";
-      const earned = this.element("input");
-      earned.type = "checkbox";
-      earned.checked = Boolean(daily?.rewards?.bedtime?.earned);
-      const awardLabel = this.element("label", " Parent-set sticker earned ");
-      awardLabel.append(earned);
-      entry.append(sticker, awardLabel, this.button("Save reward override", () => this.save("set_reward", {
-        child_id: profile.id, routine_date: date.value,
-        sticker: sticker.value, earned: earned.checked,
-      })));
       section.append(entry);
     }
     this._page.append(section);
   }
 
-  tasksForProfile(profile, data) {
-    return profile.task_overrides?.bedtime || data.default_tasks;
+  tasksForProfile(profile, data, routine = "bedtime") {
+    return profile.task_overrides?.[routine]
+      || (routine === "bedtime" ? data.default_tasks : data.default_morning_tasks);
   }
 }
 

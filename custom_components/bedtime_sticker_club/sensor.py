@@ -9,24 +9,36 @@ from .coordinator import routine_date
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = entry.runtime_data
-    async_add_entities([BedtimeSensor(coordinator, "routine"), *[
-        BedtimeSensor(coordinator, child)
-        for child in coordinator.profile_ids()
-    ]])
+    async_add_entities([
+        BedtimeSensor(coordinator, "routine"),
+        *[
+            BedtimeSensor(coordinator, child, routine)
+            for child in coordinator.profile_ids()
+            for routine in ("bedtime", "morning")
+        ],
+    ])
 
     def child_added(child):
-        async_add_entities([BedtimeSensor(coordinator, child)])
+        async_add_entities([
+            BedtimeSensor(coordinator, child, routine)
+            for routine in ("bedtime", "morning")
+        ])
 
     coordinator._async_child_added = child_added
 
 
 class BedtimeSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator, child):
+    def __init__(self, coordinator, child, routine="bedtime"):
         super().__init__(coordinator)
         self.child = child
-        self.entity_id = f"sensor.bedtime_{child}"
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{child}"
-        self._attr_name = f"Bedtime {child.replace('_', ' ').title()}"
+        self.routine = routine
+        suffix = "" if child == "routine" or routine == "bedtime" else "_morning"
+        self.entity_id = f"sensor.bedtime_{child}{suffix}"
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{child}{suffix}"
+        self._attr_name = (
+            "Bedtime routine" if child == "routine"
+            else f"{routine.title()} {coordinator.data['profiles'][child]['name']}"
+        )
         self._attr_icon = "mdi:star-face" if child == "routine" else "mdi:sticker-emoji"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.entry.entry_id)}, "name": TITLE,
@@ -37,7 +49,7 @@ class BedtimeSensor(CoordinatorEntity, SensorEntity):
         if self.child == "routine":
             return self.coordinator.phase
         child = self.coordinator.data["children"][self.child]
-        return child["total"]
+        return child["total"] if self.routine == "bedtime" else child["morning_total"]
 
     @property
     def extra_state_attributes(self):
@@ -46,7 +58,7 @@ class BedtimeSensor(CoordinatorEntity, SensorEntity):
                 "routine_date": routine_date(),
                 "dinner_time": self.coordinator.data["dinner_time"],
                 "bedtime_time": self.coordinator.data["bedtime_time"],
+                "active_routine": self.coordinator.active_routine,
+                "routine_switch_time": self.coordinator.data["routine_switch_time"],
             }
-        attrs = self.coordinator.child_attributes(self.child)
-        attrs["lifetime_total"] = self.coordinator.data["children"][self.child]["total"]
-        return attrs
+        return self.coordinator.child_attributes(self.child, self.routine)

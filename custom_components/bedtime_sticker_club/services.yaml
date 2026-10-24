@@ -16,6 +16,11 @@ set_task:
       required: true
       selector:
         date:
+    routine:
+      required: false
+      selector:
+        select:
+          options: [bedtime, morning]
 
 choose_sticker:
   fields:
@@ -32,6 +37,11 @@ choose_sticker:
       selector:
         select:
           options: ['⭐', '🌈', '🚀', '🦄', '🦖', '🐱', '🦋', '⚽']
+    routine:
+      required: false
+      selector:
+        select:
+          options: [bedtime, morning]
 
 set_avatar:
   fields:

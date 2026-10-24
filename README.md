@@ -19,7 +19,7 @@ Requires **Home Assistant 2026.10 or newer** and HACS.
    `/bedtime-club/tonight`.
 
 No package includes or dashboard YAML configuration are needed. HACS manages the
-integration files; the setup flow creates profile sensors, two reminder-time
+integration files; the setup flow creates profile sensors, three reminder-time
 entities, the routine actions, and the dashboard. Only one instance is supported.
 
 ### Manual installation
@@ -49,8 +49,10 @@ The gear at the top opens **Parent Controls**, also available at
 `/bedtime-club/parents`. Only Home Assistant administrators can change child
 profiles, tasks, schedules, or rewards. Children share the tablet dashboard but
 cannot open Parent Controls or change schedules through reminder-time entities.
-Dinner defaults to **6 pm** and bedtime to **7 pm**. Set dinner before bedtime,
-with both times at or after 4 am.
+Dinner defaults to **6 pm**, bedtime to **7 pm**, and the routine switch to noon.
+Parents can change any time in Parent Controls. The switch chooses what a card
+shows by default; a child can switch routines manually. Both task lists stay
+available all day.
 
 For a personal dashboard, add **Bedtime Sticker Club family dashboard** as a
 card in your own dashboard. Its card includes the family checklists; the bundled
@@ -70,6 +72,11 @@ dashboard cards.
 
 - Before dinner: preview tonight's routine. At dinner: highlight clearing plates.
   At bedtime: highlight unfinished teeth and outfit tasks. Tasks stay available.
+- The morning list appears every day. It starts with getting dressed, eating
+  breakfast, brushing teeth, and packing the school bag. Each child earns
+  separate morning and bedtime stickers and lifetime totals.
+- The automatic switch changes the selected routine at noon by default.
+  Children can switch their card manually; it returns to automatic at 4 am.
 - Finish all three: earn ⭐ and choose from ⭐ 🌈 🚀 🦄 🦖 🐱 🦋 ⚽. Changing the
   emoji never adds another completed day.
 - Undo a task: withdraw today's credit. Complete it again to restore the chosen
@@ -129,10 +136,13 @@ completion requests are idempotent, and a stale routine date is rejected.
 
 | Action | Required fields |
 | --- | --- |
-| `bedtime_sticker_club.set_task` | `child_id`, `task` (`plate`, `teeth`, `outfit`), `completed` (boolean), `routine_date` (`YYYY-MM-DD`) |
-| `bedtime_sticker_club.choose_sticker` | `child_id`, `routine_date`, `sticker` (one of the eight supported emojis) |
+| `bedtime_sticker_club.set_task` | `child_id`, `task`, `completed` (boolean), `routine_date` (`YYYY-MM-DD`), optional `routine` (`bedtime` default or `morning`) |
+| `bedtime_sticker_club.choose_sticker` | `child_id`, `routine_date`, `sticker` (one of the eight supported emojis), optional `routine` (`bedtime` default or `morning`) |
 
-Each child sensor stores the lifetime count in its state, plus `routine_date`,
+The bedtime child sensor IDs and actions remain compatible. Morning totals are
+available on `sensor.bedtime_<child_id>_morning`; omitting `routine` from an
+existing action continues to target bedtime. Each routine sensor stores its
+lifetime count in its state, plus `routine_date`,
 `month`, `tasks`, `completed`, `stickers`, and `child_name` attributes. Sticker
 records map dates to `{emoji, earned}`; withdrawn stickers retain their emoji.
 Use the actions above for automations. No external service is required.

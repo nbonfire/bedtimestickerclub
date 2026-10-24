@@ -25,7 +25,7 @@ from custom_components.bedtime_sticker_club import (
     register_dashboard,
     require_parent_admin,
 )
-from custom_components.bedtime_sticker_club.const import DOMAIN, TASKS
+from custom_components.bedtime_sticker_club.const import DOMAIN, ROUTINES, TASKS
 from custom_components.bedtime_sticker_club.coordinator import BedtimeCoordinator, routine_date
 
 ZONE = ZoneInfo("America/New_York")
@@ -54,14 +54,18 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.hass.async_stop()
         self.directory.cleanup()
 
-    async def task(self, task, completed=True, child="kid_1", day=None):
+    async def task(self, task, completed=True, child="kid_1", day=None, routine="bedtime"):
         await self.coordinator.async_command(
-            "task", child, day or routine_date(), task=task, completed=completed,
+            "task", child, day or routine_date(), task=task, completed=completed, routine=routine,
         )
 
     async def finish(self, child="kid_1"):
         for task in TASKS:
             await self.task(task, child=child)
+
+    async def finish_routine(self, routine, child="kid_1"):
+        for task in self.coordinator.tasks_for(child, routine):
+            await self.task(task["id"], child=child, routine=routine)
 
     def child(self, child="kid_1"):
         return self.coordinator.data["children"][child]
@@ -130,6 +134,38 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.now = datetime(2026, 10, 20, 19, tzinfo=ZONE)
         await self.finish()
         self.assertEqual(self.child()["total"], 2)
+
+    async def test_morning_and_bedtime_rewards_are_separate(self):
+        self.assertEqual(tuple(ROUTINES), ("bedtime", "morning"))
+        self.now = datetime(2026, 10, 17, 7, tzinfo=ZONE)
+        self.assertEqual(self.coordinator.active_routine, "morning")
+        self.assertEqual(
+            [task["label"] for task in self.coordinator.tasks_for("kid_1", "morning")],
+            ["Get dressed", "Eat breakfast", "Brush teeth", "Pack the school bag"],
+        )
+        await self.finish_routine("morning")
+        self.assertEqual(self.child()["morning_total"], 1)
+        self.assertEqual(self.child()["total"], 0)
+        await self.coordinator.async_command(
+            "sticker", "kid_1", routine_date(), routine="morning", sticker="🌈",
+        )
+        self.assertEqual(self.child()["morning_stickers"][routine_date()]["emoji"], "🌈")
+        self.assertEqual(self.child()["stickers"], {})
+        await self.finish()
+        self.assertEqual(self.child()["total"], 1)
+        self.assertEqual(self.child()["morning_total"], 1)
+
+    async def test_auto_switch_is_configurable_and_manual_actions_stay_daily(self):
+        self.now = datetime(2026, 10, 15, 11, 59, tzinfo=ZONE)
+        self.assertEqual(self.coordinator.active_routine, "morning")
+        old_day = routine_date()
+        self.now = self.now.replace(hour=12)
+        self.assertEqual(self.coordinator.active_routine, "bedtime")
+        self.assertEqual(routine_date(), old_day)
+        await self.coordinator.async_parent_control(
+            "schedule", schedule={"routine_switch_time": "08:00:00"},
+        )
+        self.assertEqual(self.coordinator.active_routine, "bedtime")
 
     async def test_month_year_and_dst_boundaries(self):
         await self.finish()
@@ -207,11 +243,12 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             },
         }
         upgraded = self.coordinator._upgrade(legacy)
-        self.assertEqual(upgraded["schema_version"], 2)
+        self.assertEqual(upgraded["schema_version"], 3)
         self.assertEqual(upgraded["children"]["kid_1"]["total"], 12)
         self.assertEqual(upgraded["children"]["kid_1"]["stickers"]["2026-10-15"]["emoji"], "🚀")
         self.assertEqual(upgraded["profiles"]["kid_1"]["name"], "Alex")
         self.assertEqual(upgraded["children"]["kid_1"]["morning_total"], 0)
+        self.assertEqual(upgraded["default_morning_tasks"], self.coordinator.data["default_morning_tasks"])
 
     async def test_registers_dashboard_and_preserves_existing_copy(self):
         self.hass.data[LOVELACE_DATA] = SimpleNamespace(dashboards={})
