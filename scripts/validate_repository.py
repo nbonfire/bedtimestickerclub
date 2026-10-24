@@ -45,7 +45,7 @@ def main():
     }
     assert set(card["type"] for view in dashboard["views"]
                for section in view.get("sections", [])
-               for card in section.get("cards", [])) <= {"custom:bedtime-sticker-family"}
+               for card in section.get("cards", [])) <= {"custom:bedtime-sticker-child-card"}
     assert "button_card_templates" not in dashboard
     frontend = (COMPONENT / "frontend/bedtime-sticker-club.js").read_text()
     assert 'type: "bedtime-sticker-calendar"' in frontend
@@ -55,7 +55,10 @@ def main():
     assert "custom:bedtime-sticker-calendar" not in dashboard
     assert "child_ids" in frontend
     assert [view["path"] for view in dashboard["views"]] == ["tonight", "parents"]
-    assert dashboard["views"][0]["sections"][0]["cards"][0]["type"] == "custom:bedtime-sticker-family"
+    sections = dashboard["views"][0]["sections"]
+    assert [section["cards"][0]["child_id"] for section in sections] == ["kid_1", "kid_2", "kid_3"]
+    assert all(section["cards"][0]["grid_options"]["columns"] == "full" for section in sections)
+    assert dashboard["views"][0]["max_columns"] == 3
     assert "type: custom:bedtime-sticker-parent-controls" in (COMPONENT / "dashboard.yaml").read_text()
     print(f"HACS payload validated: {manifest['domain']} {manifest['version']}")
 

@@ -45,7 +45,7 @@ Edit children's names, task lists, ordering, and archive status in Parent
 Controls. Existing `kid_1`, `kid_2`, and `kid_3` IDs stay stable; newly added
 children receive stable IDs so renaming or archiving a child preserves stickers.
 Children can choose from an emoji picker or upload JPEG, PNG, or WebP avatars.
-Images up to 5 MiB are centered, cropped to 512 × 512, and stored in
+Images up to 5 MiB are center-cropped to 512 × 512 and stored in
 `/config/bedtime_sticker_club/avatars/`. Include that directory in backups.
 Children can choose a browsable emoji or upload JPEG, PNG, or WebP avatars.
 Uploads are limited to 5 MiB, cropped to 512 × 512, and stripped of metadata.

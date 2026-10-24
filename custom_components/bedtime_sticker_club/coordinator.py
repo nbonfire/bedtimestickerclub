@@ -633,7 +633,12 @@ class BedtimeCoordinator(DataUpdateCoordinator):
         if action == "profile_create" and callback:
             callback(child_id)
         if action == "profile_create":
+            if dashboard_callback := getattr(self, "_async_update_dashboard", None):
+                await dashboard_callback()
             return child_id
+        if action in ("profile_archive", "profile_restore", "profile_move"):
+            if dashboard_callback := getattr(self, "_async_update_dashboard", None):
+                await dashboard_callback()
 
     @staticmethod
     def tasks_for_profile(data, child_id, routine="bedtime"):
