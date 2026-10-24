@@ -35,7 +35,7 @@ def main():
     assert (COMPONENT / "brand/icon.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
     assert manifest["config_flow"] is True
-    for filename in ("config_flow.py", "coordinator.py", "sensor.py", "time.py", "services.yaml", "strings.json", "translations/en.json", "frontend/bedtime-sticker-club.js"):
+    for filename in ("avatar.py", "config_flow.py", "coordinator.py", "sensor.py", "time.py", "services.yaml", "strings.json", "translations/en.json", "frontend/bedtime-sticker-club.js"):
         assert (COMPONENT / filename).is_file(), filename
     strings = json.loads((COMPONENT / "strings.json").read_text())
     assert strings == json.loads((COMPONENT / "translations/en.json").read_text())

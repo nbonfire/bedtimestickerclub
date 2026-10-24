@@ -206,6 +206,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             )
             profile.setdefault("name", child_id.replace("_", " ").title())
             profile.setdefault("avatar", "🙂")
+            profile.setdefault("avatar_image", None)
             profile.setdefault("accent", "#7541bf")
             profile.setdefault("tint", "#f0e6ff")
             profile.setdefault("size", "standard")
@@ -229,6 +230,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
         avatar = {"kid_1": "🦊", "kid_2": "🦖", "kid_3": "🦄"}.get(child_id, "🙂")
         return {
             "id": child_id, "name": name, "avatar": avatar, "accent": accent,
+            "avatar_image": None,
             "tint": tint, "size": "standard", "active": True, "order": order,
             "task_overrides": {"bedtime": None, "morning": None},
         }
@@ -331,6 +333,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             "child_id": child_id,
             "integration_entry_id": self.entry.entry_id,
             "avatar": profile["avatar"],
+            "avatar_image": profile.get("avatar_image"),
             "accent": profile["accent"],
             "tint": profile["tint"],
             "card_size": profile["size"],
@@ -700,4 +703,18 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 raise ServiceValidationError("Choose a valid emoji avatar.")
             data = deepcopy(self.data)
             data["profiles"][child_id]["avatar"] = avatar
+            data["profiles"][child_id]["avatar_image"] = None
+            await self._commit(data)
+
+    async def async_set_avatar_image(self, child_id, image_name):
+        """Persist the generated integration-local image filename."""
+        async with self.lock:
+            if child_id not in self.data["profiles"] or not self.data["profiles"][child_id]["active"]:
+                raise ServiceValidationError("Choose an active child profile.")
+            if image_name != f"{child_id}.webp":
+                raise ServiceValidationError("Invalid avatar file name.")
+            data = deepcopy(self.data)
+            if not re.fullmatch(rf"{re.escape(child_id)}-[0-9a-f]{{32}}\.webp", image_name):
+                raise ServiceValidationError("Invalid avatar file name.")
+            data["profiles"][child_id]["avatar_image"] = image_name
             await self._commit(data)

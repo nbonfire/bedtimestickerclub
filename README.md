@@ -1,7 +1,7 @@
 # Bedtime Sticker Club
 
 A shared-tablet Home Assistant dashboard for a family. Each child checks off
-clearing their plate, brushing their teeth, and choosing tomorrow's outfit.
+getting ready for the morning and completing a bedtime routine.
 Completing all three earns a sticker on their monthly calendar.
 
 ![Tablet dashboard with independent progress and a chosen rocket sticker](docs/bedtime-tablet.png)
@@ -44,6 +44,13 @@ retained, so adding it again restores the same progress.
 Edit children's names, task lists, ordering, and archive status in Parent
 Controls. Existing `kid_1`, `kid_2`, and `kid_3` IDs stay stable; newly added
 children receive stable IDs so renaming or archiving a child preserves stickers.
+Children can choose from an emoji picker or upload JPEG, PNG, or WebP avatars.
+Images up to 5 MiB are centered, cropped to 512 × 512, and stored in
+`/config/bedtime_sticker_club/avatars/`. Include that directory in backups.
+Children can choose a browsable emoji or upload JPEG, PNG, or WebP avatars.
+Uploads are limited to 5 MiB, cropped to 512 × 512, and stripped of metadata.
+Home Assistant stores them in `/config/bedtime_sticker_club/avatars/`; include
+that folder in backups.
 
 The gear at the top opens **Parent Controls**, also available at
 `/bedtime-club/parents`. Only Home Assistant administrators can change child
