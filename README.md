@@ -61,9 +61,9 @@ Parents can change any time in Parent Controls. The switch chooses what a card
 shows by default; a child can switch routines manually. Both task lists stay
 available all day.
 
-For a personal dashboard, add **Bedtime Sticker Club family dashboard** as a
-card in your own dashboard. Its card includes the family checklists; the bundled
-sidebar dashboard remains available for Parent Controls.
+Add **Bedtime Sticker Club child checklist** or **Bedtime Sticker Club calendar**
+from Home Assistant's **Add card** picker to use them on any dashboard. The
+bundled family dashboard remains available for Parent Controls.
 
 For a personal YAML dashboard, include the native family card:
 
@@ -76,9 +76,17 @@ Add a shared sticker calendar to another dashboard with
 of child profile IDs; without it, the calendar shows all active children.
 Each month cell lists the selected children's morning and bedtime stickers.
 
-Add the card through Home Assistant's card picker after downloading the
-integration. Keep child profile IDs and entity IDs stable in any child-specific
-dashboard cards.
+Add an individual configurable checklist card with:
+
+```yaml
+type: custom:bedtime-sticker-child-card
+child_id: kid_1
+routine: auto
+size: inherit
+calendar: collapsible
+```
+
+The visual editors save these settings while preserving stable child profile IDs.
 
 ## How it behaves
 
