@@ -42,7 +42,7 @@ async def async_handle_parent_action(hass, connection, entry_id, action, data):
 
 async def async_setup(hass, config: ConfigType):
     """Register the native cards and the administrator-only Parent Controls API."""
-    from homeassistant.http import StaticPathConfig
+    from homeassistant.components.http import StaticPathConfig
 
     hass.data.setdefault(DOMAIN, {})
     await hass.http.async_register_static_paths([
