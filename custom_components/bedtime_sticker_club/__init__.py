@@ -16,6 +16,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
+from .avatar import ChildAvatarView
 from .const import DASHBOARD_URL, DOMAIN, ROUTINES, STICKERS, TITLE
 from .coordinator import BedtimeCoordinator
 
@@ -54,6 +55,7 @@ async def async_setup(hass, config: ConfigType):
         )
     ])
     frontend.add_extra_js_url(hass, FRONTEND_URL)
+    hass.http.register_view(ChildAvatarView)
 
     @websocket_api.websocket_command({
         vol.Required("type"): f"{DOMAIN}/admin",

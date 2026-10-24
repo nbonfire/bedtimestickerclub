@@ -2,6 +2,11 @@
 
 const DOMAIN = "bedtime_sticker_club";
 const STICKERS = ["⭐", "🌈", "🚀", "🦄", "🦖", "🐱", "🦋", "⚽"];
+const AVATAR_CHOICES = [
+  "🦊", "🦖", "🦄", "🐱", "🐶", "🐻", "🐼", "🐸", "🐵", "🐰", "🐯", "🐨",
+  "🦁", "🐷", "🐮", "🐔", "🐢", "🐙", "🦋", "🐝", "🐬", "🐧", "🦉", "🐲",
+  "⭐", "🌈", "🚀", "⚽", "🎨", "🌻", "🍓", "🎵", "🦕", "🐳", "🦩", "🐺",
+];
 
 class BedtimeCard extends HTMLElement {
   constructor() {
@@ -47,6 +52,10 @@ class BedtimeCard extends HTMLElement {
       .children { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr)); gap:14px; align-items:start }
       .child { background:#fffefb; border:3px solid var(--accent,#7541bf); border-radius:24px;
         box-shadow:3px 4px 0 color-mix(in srgb,var(--accent,#7541bf) 18%,transparent); padding:16px; min-width:0 }
+      .child.size-compact { padding:10px; border-width:2px; border-radius:18px }
+      .child.size-large { padding:22px; border-radius:30px }
+      .child.size-compact .name { font-size:20px }
+      .child.size-large .name { font-size:28px }
       .identity { display:flex; align-items:center; gap:12px; min-width:0 }
       .avatar { width:56px; height:56px; flex:none; display:grid; place-items:center;
         border:0; border-radius:18px; color:inherit; background:var(--tint,#f0e6ff);
@@ -80,6 +89,15 @@ class BedtimeCard extends HTMLElement {
       .task-row button,.profile button { min-height:44px }
       h2,h3 { margin:6px 0; font-size:19px }
       .error { color:#9c3918; font-weight:700 }
+      .picker-backdrop { position:fixed; inset:0; z-index:1000; display:grid; place-items:center;
+        padding:16px; background:#211b2d88 }
+      .picker-dialog { width:min(100%,480px); max-height:90vh; overflow:auto; display:grid;
+        gap:12px; padding:20px; border-radius:24px; background:#fffefb; box-shadow:0 10px 48px #0005 }
+      .picker-emoji { display:grid; grid-template-columns:repeat(6,minmax(48px,1fr)); gap:6px }
+      .picker-emoji button { min-height:48px; padding:2px; text-align:center; font-size:25px }
+      .picker-dialog input[type=text] { min-height:48px; padding:10px; border:1px solid #90889b;
+        border-radius:10px; color:var(--ink); font:inherit }
+      .avatar-image { display:block; width:100%; height:100%; object-fit:cover; border-radius:inherit }
       @media(max-width:400px) { .child { padding:12px } .name { font-size:21px } }
     `;
     this.shadowRoot.append(style);
@@ -142,6 +160,7 @@ class BedtimeFamilyCard extends BedtimeCard {
   constructor() {
     super();
     this._routineOverrides = new Map();
+    this._avatarObjects = new Map();
   }
 
   renderFamily() {
@@ -195,14 +214,29 @@ class BedtimeFamilyCard extends BedtimeCard {
     const selected = routine === "morning" && morningState ? morningState : state;
     const routineAttributes = selected.attributes;
     const card = this.element("article", undefined, "child");
+    card.classList.add(`size-${attributes.card_size || "standard"}`);
     card.style.setProperty("--accent", attributes.accent || "#7541bf");
     card.style.setProperty("--tint", attributes.tint || "#f0e6ff");
     const identity = this.element("header", undefined, "identity");
     const avatar = this.button(attributes.avatar || "🙂", async () => {
-      const next = prompt(`Choose ${attributes.child_name}’s emoji avatar`, attributes.avatar || "🙂");
-      if (next) await this.call("set_avatar", {child_id: attributes.child_id, avatar: next});
+      this.showAvatarPicker(attributes);
     }, "avatar");
     avatar.setAttribute("aria-label", `Change ${attributes.child_name}'s avatar`);
+    avatar.setAttribute("aria-haspopup", "dialog");
+    const avatarImage = this._avatarObjects.get(attributes.child_id)?.filename || attributes.avatar_image;
+    if (avatarImage) {
+      avatar.textContent = "";
+      const image = this.element("img");
+      image.className = "avatar-image";
+      image.alt = "";
+      avatar.append(image);
+      this.loadAvatar(attributes.child_id, avatarImage).then((url) => {
+        if (url && image.isConnected) image.src = url;
+        else if (image.isConnected) avatar.textContent = attributes.avatar || "🙂";
+      }).catch(() => {
+        if (image.isConnected) avatar.textContent = attributes.avatar || "🙂";
+      });
+    }
     identity.append(avatar);
     const name = this.element("div");
     name.append(this.element("div", attributes.child_name, "name"));
@@ -259,6 +293,107 @@ class BedtimeFamilyCard extends BedtimeCard {
     const total = routineAttributes.lifetime_total ?? selected.state;
     card.append(this.element("p", `🏆 ${total} ${routine}${Number(total) === 1 ? "" : "s"} completed`, "muted"));
     return card;
+  }
+
+  async authenticatedFetch(path, options = {}) {
+    if (this._hass.fetchWithAuth) return this._hass.fetchWithAuth(path, options);
+    const token = this._hass.auth?.data?.access_token || this._hass.auth?.accessToken;
+    if (!token) throw new Error("Reconnect Home Assistant before uploading or loading an avatar.");
+    return fetch(path, {
+      ...options,
+      headers: {"Authorization": `Bearer ${token}`, ...(options.headers || {})},
+    });
+  }
+
+  async loadAvatar(childId, filename) {
+    const cached = this._avatarObjects.get(childId);
+    if (cached?.filename === filename) return cached.url;
+    const response = await this.authenticatedFetch(`/api/${DOMAIN}/avatars/${encodeURIComponent(childId)}`);
+    if (!response.ok) return null;
+    const previous = this._avatarObjects.get(childId);
+    if (previous) URL.revokeObjectURL(previous.url);
+    const url = URL.createObjectURL(await response.blob());
+    this._avatarObjects.set(childId, {filename, url});
+    return url;
+  }
+
+  showAvatarPicker(profile) {
+    const backdrop = this.element("div", undefined, "picker-backdrop");
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) backdrop.remove();
+    });
+    const dialog = this.element("section", undefined, "picker-dialog");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", `Choose ${profile.child_name}'s avatar`);
+    const title = this.element("h2", `Choose ${profile.child_name}’s avatar`);
+    dialog.append(title);
+    dialog.append(this.element("p", "Choose an emoji or upload a square-cropped image.", "muted"));
+    const emojiGrid = this.element("div", undefined, "picker-emoji");
+    for (const emoji of AVATAR_CHOICES) {
+      const choice = this.button(emoji, async () => {
+        await this.call("set_avatar", {child_id: profile.child_id, avatar: emoji});
+        const previous = this._avatarObjects.get(profile.child_id);
+        if (previous) URL.revokeObjectURL(previous.url);
+        this._avatarObjects.delete(profile.child_id);
+        backdrop.remove();
+      });
+      choice.setAttribute("aria-label", `Use ${emoji} as ${profile.child_name}'s avatar`);
+      emojiGrid.append(choice);
+    }
+    dialog.append(emojiGrid);
+    const customLabel = this.element("label", "Enter another emoji");
+    const custom = this.input(profile.avatar, "text", "Enter another emoji");
+    custom.maxLength = 16;
+    customLabel.append(custom);
+    dialog.append(customLabel);
+    dialog.append(this.button("Save emoji", async () => {
+      if ([...custom.value].length > 0) {
+        await this.call("set_avatar", {child_id: profile.child_id, avatar: custom.value});
+        backdrop.remove();
+      }
+    }));
+    const upload = this.element("input");
+    upload.type = "file";
+    upload.accept = "image/jpeg,image/png,image/webp";
+    upload.setAttribute("aria-label", "Upload a photo avatar");
+    const uploadButton = this.button("Upload image", () => upload.click());
+    upload.addEventListener("change", async () => {
+      const file = upload.files?.[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+        this._error = "Choose a JPEG, PNG, or WebP image no larger than 5 MiB.";
+        this.render();
+        return;
+      }
+      uploadButton.disabled = true;
+      uploadButton.textContent = "Uploading…";
+      try {
+        const result = await this.authenticatedFetch(
+          `/api/${DOMAIN}/avatars/${encodeURIComponent(profile.child_id)}`,
+          {method: "POST", headers: {"Content-Type": file.type}, body: file},
+        );
+        if (!result.ok) throw new Error((await result.text()) || "Home Assistant could not save the avatar.");
+        const body = await result.json();
+        const previous = this._avatarObjects.get(profile.child_id);
+        if (previous) URL.revokeObjectURL(previous.url);
+        this._avatarObjects.delete(profile.child_id);
+        await this.loadAvatar(profile.child_id, body.avatar_image);
+        this._error = null;
+        backdrop.remove();
+        this.render();
+      } catch (error) {
+        uploadButton.disabled = false;
+        uploadButton.textContent = "Upload image";
+        const message = this.element("p", error.message, "error");
+        dialog.append(message);
+      }
+    });
+    dialog.append(upload, uploadButton);
+    dialog.append(this.button("Cancel", () => backdrop.remove()));
+    backdrop.append(dialog);
+    this.shadowRoot.append(backdrop);
+    custom.focus();
   }
 }
 
@@ -346,9 +481,16 @@ class BedtimeParentCard extends BedtimeCard {
     for (const profile of data.profiles) {
       const row = this.element("div", undefined, "profile");
       const name = this.input(profile.name, "text", `${profile.name}'s name`);
+      const size = this.element("select");
+      for (const value of ["compact", "standard", "large"]) {
+        const option = this.element("option", value[0].toUpperCase() + value.slice(1));
+        option.value = value;
+        size.append(option);
+      }
+      size.value = profile.size || "standard";
       const actions = this.element("div", undefined, "toolbar");
       actions.append(this.button("Save name", () => this.save("profile_update", {
-        child_id: profile.id, name: name.value,
+        child_id: profile.id, name: name.value, size: size.value,
       })));
       const currentPosition = data.profiles.indexOf(profile);
       if (currentPosition > 0) actions.append(this.button("↑", () => this.save("profile_move", {
@@ -360,7 +502,7 @@ class BedtimeParentCard extends BedtimeCard {
       actions.append(this.button(profile.active ? "Archive" : "Restore", () => this.save(
         profile.active ? "profile_archive" : "profile_restore", {child_id: profile.id},
       )));
-      row.append(name, actions);
+      row.append(name, size, actions);
       section.append(row);
     }
     const add = this.element("div", undefined, "toolbar");
