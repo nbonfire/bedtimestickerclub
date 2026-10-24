@@ -452,7 +452,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                     "task_overrides": {"bedtime": None},
                 }
                 callback = getattr(self, "_async_child_added", None)
-            elif action != "default_tasks" and child_id not in profiles:
+            elif action not in ("default_tasks", "schedule") and child_id not in profiles:
                 raise ServiceValidationError("Choose an existing child profile.")
             elif action == "profile_update":
                 profile = profiles[child_id]
