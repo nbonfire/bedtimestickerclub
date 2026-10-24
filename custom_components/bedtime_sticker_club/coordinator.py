@@ -14,8 +14,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CHILDREN, DEFAULT_BEDTIME, DEFAULT_DINNER, DEFAULT_SWITCH_TIME, DEFAULT_TASKS,
-    DOMAIN, PROFILE_COLORS, STORAGE_KEY, STICKERS, TASKS,
+    CHILDREN, DEFAULT_BEDTIME, DEFAULT_DINNER, DEFAULT_MORNING_TASKS,
+    DEFAULT_SWITCH_TIME, DEFAULT_TASKS, DOMAIN, PROFILE_COLORS, ROUTINES,
+    STORAGE_KEY, STICKERS, TASKS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,16 +30,18 @@ def routine_date():
 
 def empty_data():
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "dinner_time": DEFAULT_DINNER,
         "bedtime_time": DEFAULT_BEDTIME,
         "routine_switch_time": DEFAULT_SWITCH_TIME,
         "default_tasks": deepcopy(DEFAULT_TASKS),
+        "default_morning_tasks": deepcopy(DEFAULT_MORNING_TASKS),
         "profiles": {},
         "children": {
             child: {
                 "total": 0, "morning_total": 0, "month": "", "stickers": {},
-                "task_dates": {}, "days": {}, "task_overrides": {"bedtime": None},
+                "morning_stickers": {}, "task_dates": {}, "morning_task_dates": {},
+                "days": {}, "task_overrides": {"bedtime": None, "morning": None},
             }
             for child in CHILDREN
         },
@@ -60,69 +63,83 @@ def reconcile(data, day):
             for saved_day, sticker in child["stickers"].items()
             if saved_day[:7] == day[:7]
         }
+        child["morning_stickers"] = {
+            saved_day: sticker
+            for saved_day, sticker in child["morning_stickers"].items()
+            if saved_day[:7] == day[:7]
+        }
         profile = data["profiles"][child_id]
         daily = child["days"].setdefault(day, {"tasks": {}, "rewards": {}})
         daily.setdefault("tasks", {})
         daily.setdefault("rewards", {})
-        required = daily.setdefault(
-            "required_tasks",
-            profile.get("task_overrides", {}).get("bedtime") or data["default_tasks"],
-        )
-        task_state = daily["tasks"].setdefault("bedtime", {
-            task["id"]: child["task_dates"].get(task["id"]) == day
-            for task in required
-        })
-        legacy = child["stickers"].get(day)
-        reward = daily["rewards"].setdefault("bedtime", {
-            **(deepcopy(legacy) if legacy else {"emoji": "⭐", "earned": False}),
-            "override": None,
-        })
-        if reward.get("override") is not None:
-            earned = bool(reward["override"])
-        else:
-            earned = bool(required) and all(task_state.get(task["id"], False) for task in required)
-        was_earned = bool(reward.get("earned"))
-        reward["earned"] = earned
-        child["total"] = max(0, child["total"] + int(earned) - int(was_earned))
-        if earned or legacy or reward.get("override") is not None:
-            reward["emoji"] = reward.get("emoji", "⭐")
-            child["stickers"][day] = {"emoji": reward["emoji"], "earned": earned}
+        for routine in ROUTINES:
+            required_key = "required_tasks" if routine == "bedtime" else "morning_required_tasks"
+            dates_key = "task_dates" if routine == "bedtime" else "morning_task_dates"
+            stickers_key = "stickers" if routine == "bedtime" else "morning_stickers"
+            required = daily.setdefault(
+                required_key,
+                profile.get("task_overrides", {}).get(routine)
+                or data[f"default_{routine}_tasks"],
+            )
+            task_state = daily["tasks"].setdefault(routine, {
+                task["id"]: child[dates_key].get(task["id"]) == day
+                for task in required
+            })
+            legacy = child[stickers_key].get(day)
+            reward = daily["rewards"].setdefault(routine, {
+                **(deepcopy(legacy) if legacy else {"emoji": "⭐", "earned": False}),
+                "override": None,
+            })
+            earned = (
+                bool(reward["override"])
+                if reward.get("override") is not None
+                else bool(required) and all(task_state.get(task["id"], False) for task in required)
+            )
+            was_earned = bool(reward.get("earned"))
+            reward["earned"] = earned
+            total_key = "total" if routine == "bedtime" else "morning_total"
+            child[total_key] = max(0, child[total_key] + int(earned) - int(was_earned))
+            if earned or legacy or reward.get("override") is not None:
+                reward["emoji"] = reward.get("emoji", "⭐")
+                child[stickers_key][day] = {"emoji": reward["emoji"], "earned": earned}
 
 
-def install_task_snapshot(data, child_id, day, task_list):
+def install_task_snapshot(data, child_id, day, task_list, routine="bedtime"):
     """Apply an effective task list to one dated routine snapshot."""
     child = data["children"][child_id]
-    profile = data["profiles"][child_id]
     daily = child["days"].setdefault(day, {"tasks": {}, "rewards": {}})
     daily.setdefault("tasks", {})
     daily.setdefault("rewards", {})
-    previous = daily.get("required_tasks", DEFAULT_TASKS)
-    state = daily["tasks"].setdefault("bedtime", {
-        task["id"]: child["task_dates"].get(task["id"]) == day
+    required_key = "required_tasks" if routine == "bedtime" else "morning_required_tasks"
+    dates_key = "task_dates" if routine == "bedtime" else "morning_task_dates"
+    stickers_key = "stickers" if routine == "bedtime" else "morning_stickers"
+    previous = daily.get(required_key, data[f"default_{routine}_tasks"])
+    state = daily["tasks"].setdefault(routine, {
+        task["id"]: child[dates_key].get(task["id"]) == day
         for task in previous
     })
-    daily["tasks"]["bedtime"] = {
+    daily["tasks"][routine] = {
         task["id"]: state.get(task["id"], False) for task in task_list
     }
     changed = task_list != previous
-    daily["required_tasks"] = deepcopy(task_list)
-    legacy = child["stickers"].get(day)
-    reward = daily["rewards"].setdefault("bedtime", {
+    daily[required_key] = deepcopy(task_list)
+    legacy = child[stickers_key].get(day)
+    reward = daily["rewards"].setdefault(routine, {
         **(deepcopy(legacy) if legacy else {"emoji": "⭐", "earned": False}),
         "override": None,
     })
     if changed:
         reward["override"] = None
-    BedtimeCoordinator._recalculate(data, child, day, "bedtime", reward)
+    BedtimeCoordinator._recalculate(data, child, day, routine, reward)
     if day == routine_date():
         ids = {task["id"] for task in task_list}
-        for task_id in set(child["task_dates"]) - ids:
-            child["task_dates"].pop(task_id, None)
-        for task_id, done in daily["tasks"]["bedtime"].items():
+        for task_id in set(child[dates_key]) - ids:
+            child[dates_key].pop(task_id, None)
+        for task_id, done in daily["tasks"][routine].items():
             if not done:
-                child["task_dates"][task_id] = "1970-01-01"
+                child[dates_key][task_id] = "1970-01-01"
             else:
-                child["task_dates"][task_id] = day
+                child[dates_key][task_id] = day
 
 
 class BedtimeCoordinator(DataUpdateCoordinator):
@@ -146,13 +163,14 @@ class BedtimeCoordinator(DataUpdateCoordinator):
 
     def _upgrade(self, data):
         """Apply idempotent ledger migrations and fill profile defaults."""
-        if data.get("schema_version", 1) > 2:
+        if data.get("schema_version", 1) > 3:
             raise ServiceValidationError("The saved sticker data was created by a newer integration version.")
-        data.setdefault("schema_version", 2)
+        data.setdefault("schema_version", 3)
         data.setdefault("dinner_time", DEFAULT_DINNER)
         data.setdefault("bedtime_time", DEFAULT_BEDTIME)
         data.setdefault("routine_switch_time", DEFAULT_SWITCH_TIME)
         data.setdefault("default_tasks", deepcopy(DEFAULT_TASKS))
+        data.setdefault("default_morning_tasks", deepcopy(DEFAULT_MORNING_TASKS))
         data.setdefault("scheduled_tasks", {})
         data.setdefault("profiles", {})
         names = self.entry.options or self.entry.data
@@ -164,7 +182,8 @@ class BedtimeCoordinator(DataUpdateCoordinator):
         for child_id in data["profiles"]:
             data["children"].setdefault(child_id, {
                 "total": 0, "morning_total": 0, "month": "", "stickers": {},
-                "task_dates": {}, "days": {}, "task_overrides": {"bedtime": None},
+                "task_dates": {}, "morning_task_dates": {}, "morning_stickers": {},
+                "days": {}, "task_overrides": {"bedtime": None, "morning": None},
             })
         for child_id, child in data["children"].items():
             child.setdefault("total", 0)
@@ -172,6 +191,8 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             child.setdefault("month", "")
             child.setdefault("stickers", {})
             child.setdefault("task_dates", {})
+            child.setdefault("morning_task_dates", {})
+            child.setdefault("morning_stickers", {})
             child.setdefault("days", {})
             child.setdefault("task_overrides", {"bedtime": None})
             profile = data["profiles"].setdefault(
@@ -186,6 +207,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             profile.setdefault("active", True)
             profile.setdefault("order", len(data["profiles"]) - 1)
             child["task_overrides"].setdefault("bedtime", None)
+            child["task_overrides"].setdefault("morning", None)
             for day, sticker in child["stickers"].items():
                 record = child["days"].setdefault(day, {"tasks": {}, "rewards": {}})
                 record["rewards"].setdefault("bedtime", deepcopy(sticker))
@@ -193,7 +215,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 # were complete; withdrawn records do not prove which was done.
                 if sticker.get("earned") and "bedtime" not in record["tasks"]:
                     record["tasks"]["bedtime"] = dict.fromkeys(TASKS, True)
-        data["schema_version"] = 2
+        data["schema_version"] = 3
         return data
 
     @staticmethod
@@ -203,7 +225,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
         return {
             "id": child_id, "name": name, "avatar": avatar, "accent": accent,
             "tint": tint, "size": "standard", "active": True, "order": order,
-            "task_overrides": {"bedtime": None},
+            "task_overrides": {"bedtime": None, "morning": None},
         }
 
     def profile_ids(self, *, active=None):
@@ -215,12 +237,14 @@ class BedtimeCoordinator(DataUpdateCoordinator):
     def tasks_for(self, child_id, routine="bedtime"):
         today = routine_date()
         daily = self.data["children"][child_id]["days"].get(today, {})
-        snapshot = daily.get("required_tasks")
+        snapshot = daily.get(
+            "required_tasks" if routine == "bedtime" else "morning_required_tasks"
+        )
         if snapshot is not None:
             return deepcopy(snapshot)
         profile = self.data["profiles"][child_id]
         override = profile.get("task_overrides", {}).get(routine)
-        return deepcopy(override if override is not None else self.data["default_tasks"])
+        return deepcopy(override if override is not None else self.data[f"default_{routine}_tasks"])
 
     @staticmethod
     def profile_ids_from(profiles):
@@ -261,7 +285,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             old = state(f"input_datetime.bedtime_{name}")
             if old and dt_util.parse_time(old.state) is not None:
                 data[name] = old.state
-        data["schema_version"] = 2
+        data["schema_version"] = 3
         return data
 
     @property
@@ -274,22 +298,30 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             return "bedtime"
         return "dinner" if clock >= dinner else "daytime"
 
-    def child_attributes(self, child_id):
+    @property
+    def active_routine(self):
+        clock = dt_util.now().strftime("%H:%M:%S")
+        return "morning" if "04:00:00" <= clock < self.data["routine_switch_time"] else "bedtime"
+
+    def child_attributes(self, child_id, routine="bedtime"):
         child = self.data["children"][child_id]
         profile = self.data["profiles"][child_id]
         day = routine_date()
+        dates_key = "task_dates" if routine == "bedtime" else "morning_task_dates"
+        stickers_key = "stickers" if routine == "bedtime" else "morning_stickers"
         tasks = {
-            task["id"]: child["task_dates"].get(task["id"]) == day
-            for task in self.tasks_for(child_id)
+            task["id"]: child[dates_key].get(task["id"]) == day
+            for task in self.tasks_for(child_id, routine)
         }
         daily = child["days"].get(day, {})
         return {
             "routine_date": day,
             "month": day[:7],
+            "routine": routine,
             "tasks": tasks,
-            "task_definitions": self.tasks_for(child_id),
+            "task_definitions": self.tasks_for(child_id, routine),
             "completed": sum(tasks.values()),
-            "stickers": child["stickers"] if child["month"] == day[:7] else {},
+            "stickers": child[stickers_key] if child["month"] == day[:7] else {},
             "child_name": profile["name"],
             "child_id": child_id,
             "integration_entry_id": self.entry.entry_id,
@@ -299,7 +331,8 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             "card_size": profile["size"],
             "archived": not profile["active"],
             "display_order": profile["order"],
-            "earned": daily.get("rewards", {}).get("bedtime", {}).get("earned", False),
+            "earned": daily.get("rewards", {}).get(routine, {}).get("earned", False),
+            "lifetime_total": child["total"] if routine == "bedtime" else child["morning_total"],
         }
 
     async def _commit(self, data):
@@ -312,7 +345,10 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             today = routine_date()
             for effective_day in sorted(day for day in data["scheduled_tasks"] if day <= today):
                 for update in data["scheduled_tasks"].pop(effective_day):
-                    install_task_snapshot(data, update["child_id"], effective_day, update["tasks"])
+                    install_task_snapshot(
+                        data, update["child_id"], effective_day,
+                        update["tasks"], update.get("routine", "bedtime"),
+                    )
             reconcile(data, today)
             if data != self.data:
                 await self._commit(data)
@@ -328,55 +364,62 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             reconcile(data, day)
             child = data["children"][child_id]
             profile = data["profiles"][child_id]
+            routine = values.get("routine", "bedtime")
+            if routine not in ROUTINES:
+                raise ServiceValidationError("Choose the morning or bedtime routine.")
             if operation == "task":
                 task, completed = values.get("task"), values.get("completed")
-                allowed_tasks = {item["id"] for item in self.tasks_for(child_id)}
+                allowed_tasks = {item["id"] for item in self.tasks_for(child_id, routine)}
                 if task not in allowed_tasks or type(completed) is not bool:
                     raise ServiceValidationError("Invalid task or completion value.")
-                was_completed = child["task_dates"].get(task) == day
-                child["task_dates"][task] = day if completed else "1970-01-01"
+                dates_key = "task_dates" if routine == "bedtime" else "morning_task_dates"
+                was_completed = child[dates_key].get(task) == day
+                child[dates_key][task] = day if completed else "1970-01-01"
                 reconcile(data, day)
-                daily = self._day_record(child, day, profile)
-                task_state = daily["tasks"].setdefault("bedtime", {})
+                daily = self._day_record(child, day, profile, routine)
+                task_state = daily["tasks"].setdefault(routine, {})
                 task_state[task] = completed
-                reward = daily["rewards"].setdefault("bedtime", {
+                reward = daily["rewards"].setdefault(routine, {
                     "emoji": "⭐", "earned": False, "override": None,
                 })
                 if was_completed != completed:
                     reward["override"] = None
-                self._recalculate(data, child, day, "bedtime", reward)
+                self._recalculate(data, child, day, routine, reward)
             elif operation == "sticker":
                 sticker = values.get("sticker")
-                daily = self._day_record(child, day, profile)
-                record = daily["rewards"].get("bedtime", {})
+                daily = self._day_record(child, day, profile, routine)
+                record = daily["rewards"].get(routine, {})
                 if sticker not in STICKERS or not record.get("earned"):
-                    raise ServiceValidationError("Finish all three tasks and choose a supported sticker.")
+                    raise ServiceValidationError("Finish this routine's tasks and choose a supported sticker.")
                 record["emoji"] = sticker
-                child["stickers"][day] = {
-                    "emoji": sticker, "earned": record["earned"],
-                }
+                stickers_key = "stickers" if routine == "bedtime" else "morning_stickers"
+                child[stickers_key][day] = {"emoji": sticker, "earned": record["earned"]}
             else:
                 raise ServiceValidationError("Invalid operation.")
             await self._commit(data)
 
     @staticmethod
-    def _day_record(child, day, profile=None):
+    def _day_record(child, day, profile=None, routine="bedtime"):
         """Return a dated snapshot, seeding known legacy sticker records."""
         record = child["days"].setdefault(day, {"tasks": {}, "rewards": {}})
         record.setdefault("tasks", {})
         record.setdefault("rewards", {})
-        legacy = child["stickers"].get(day)
-        reward = record["rewards"].setdefault("bedtime", {
+        stickers_key = "stickers" if routine == "bedtime" else "morning_stickers"
+        dates_key = "task_dates" if routine == "bedtime" else "morning_task_dates"
+        required_key = "required_tasks" if routine == "bedtime" else "morning_required_tasks"
+        legacy = child[stickers_key].get(day)
+        reward = record["rewards"].setdefault(routine, {
             **(deepcopy(legacy) if legacy else {"emoji": "⭐", "earned": False}),
             "override": None,
         })
         if "override" not in reward:
             reward["override"] = None
-        if "bedtime" not in record["tasks"]:
-            record["tasks"]["bedtime"] = {}
+        if routine not in record["tasks"]:
+            record["tasks"][routine] = {}
             if profile and legacy and legacy.get("earned"):
-                record["tasks"]["bedtime"] = dict.fromkeys(TASKS, True)
-        record.setdefault("required_tasks", deepcopy(DEFAULT_TASKS))
+                record["tasks"][routine] = dict.fromkeys(TASKS, True)
+        fallback = DEFAULT_TASKS if routine == "bedtime" else DEFAULT_MORNING_TASKS
+        record.setdefault(required_key, deepcopy(fallback))
         return record
 
     @staticmethod
@@ -386,13 +429,15 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             earned = bool(reward["override"])
         else:
             tasks = child["days"][day]["tasks"].get(routine, {})
-            required = child["days"][day].get("required_tasks", DEFAULT_TASKS)
+            required_key = "required_tasks" if routine == "bedtime" else "morning_required_tasks"
+            fallback = DEFAULT_TASKS if routine == "bedtime" else DEFAULT_MORNING_TASKS
+            required = child["days"][day].get(required_key, fallback)
             earned = bool(required) and all(tasks.get(item["id"], False) for item in required)
         reward["earned"] = earned
         total_key = "total" if routine == "bedtime" else "morning_total"
         child[total_key] = max(0, child[total_key] + int(earned) - int(previous))
-        if routine == "bedtime":
-            child["stickers"][day] = {"emoji": reward.get("emoji", "⭐"), "earned": earned}
+        stickers_key = "stickers" if routine == "bedtime" else "morning_stickers"
+        child[stickers_key][day] = {"emoji": reward.get("emoji", "⭐"), "earned": earned}
 
     @staticmethod
     def _validate_task_list(tasks):
@@ -430,6 +475,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 return {
                     "profiles": sorted(profiles.values(), key=lambda item: item["order"]),
                     "default_tasks": deepcopy(data["default_tasks"]),
+                    "default_morning_tasks": deepcopy(data["default_morning_tasks"]),
                     "schedule": {
                         key: data[key]
                         for key in ("dinner_time", "bedtime_time", "routine_switch_time")
@@ -448,8 +494,9 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 profiles[child_id] = self._new_profile(child_id, name, len(profiles))
                 children[child_id] = {
                     "total": 0, "morning_total": 0, "month": today[:7],
-                    "stickers": {}, "task_dates": {}, "days": {},
-                    "task_overrides": {"bedtime": None},
+                    "stickers": {}, "morning_stickers": {},
+                    "task_dates": {}, "morning_task_dates": {}, "days": {},
+                    "task_overrides": {"bedtime": None, "morning": None},
                 }
                 callback = getattr(self, "_async_child_added", None)
             elif action not in ("default_tasks", "schedule") and child_id not in profiles:
@@ -486,45 +533,62 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 for position, item in enumerate(ordered):
                     profiles[item]["order"] = position
             elif action == "default_tasks":
-                data["default_tasks"] = self._validate_task_list(values.get("tasks"))
-                await self._apply_task_list_change(data, "", data["default_tasks"], values.get("effective_day", "tomorrow"), today)
+                routine = values.get("routine", "bedtime")
+                if routine not in ROUTINES:
+                    raise ServiceValidationError("Choose the morning or bedtime routine.")
+                default_key = f"default_{routine}_tasks"
+                data[default_key] = self._validate_task_list(values.get("tasks"))
+                await self._apply_task_list_change(
+                    data, "", data[default_key], values.get("effective_day", "tomorrow"), today, routine,
+                )
             elif action == "child_tasks":
+                routine = values.get("routine", "bedtime")
+                if routine not in ROUTINES:
+                    raise ServiceValidationError("Choose the morning or bedtime routine.")
                 effective = values.get("effective_day", "tomorrow")
                 override = values.get("tasks")
-                profiles[child_id]["task_overrides"]["bedtime"] = (
+                profiles[child_id]["task_overrides"][routine] = (
                     None if override is None else self._validate_task_list(override)
                 )
-                chosen = profiles[child_id]["task_overrides"]["bedtime"] or data["default_tasks"]
-                await self._apply_task_list_change(data, child_id, chosen, effective, today)
+                chosen = profiles[child_id]["task_overrides"][routine] or data[f"default_{routine}_tasks"]
+                await self._apply_task_list_change(data, child_id, chosen, effective, today, routine)
             elif action == "correct_task":
                 day, task_id, completed = values.get("routine_date"), values.get("task"), values.get("completed")
+                routine = values.get("routine", "bedtime")
+                if routine not in ROUTINES:
+                    raise ServiceValidationError("Choose the morning or bedtime routine.")
                 self._validate_correction_day(day, today)
-                task_ids = {item["id"] for item in self.tasks_for_profile(data, child_id)}
+                task_ids = {item["id"] for item in self.tasks_for_profile(data, child_id, routine)}
                 if task_id not in task_ids or type(completed) is not bool:
-                    raise ServiceValidationError("Choose a current bedtime task and completion value.")
+                    raise ServiceValidationError("Choose a current routine task and completion value.")
                 child = children[child_id]
-                daily = self._day_record(child, day, profiles[child_id])
-                daily["required_tasks"] = self.tasks_for_profile(data, child_id)
-                task_state = daily["tasks"].setdefault("bedtime", {})
+                daily = self._day_record(child, day, profiles[child_id], routine)
+                required_key = "required_tasks" if routine == "bedtime" else "morning_required_tasks"
+                dates_key = "task_dates" if routine == "bedtime" else "morning_task_dates"
+                daily[required_key] = self.tasks_for_profile(data, child_id, routine)
+                task_state = daily["tasks"].setdefault(routine, {})
                 changed = task_state.get(task_id, False) is not completed
                 task_state[task_id] = completed
-                reward = daily["rewards"]["bedtime"]
+                reward = daily["rewards"][routine]
                 if changed:
                     reward["override"] = None
-                self._recalculate(data, child, day, "bedtime", reward)
+                self._recalculate(data, child, day, routine, reward)
                 if day == today:
-                    child["task_dates"][task_id] = day if completed else "1970-01-01"
+                    child[dates_key][task_id] = day if completed else "1970-01-01"
             elif action == "set_reward":
                 day, earned = values.get("routine_date"), values.get("earned")
+                routine = values.get("routine", "bedtime")
                 sticker = values.get("sticker", "⭐")
+                if routine not in ROUTINES:
+                    raise ServiceValidationError("Choose the morning or bedtime routine.")
                 self._validate_correction_day(day, today)
                 if type(earned) is not bool or sticker not in STICKERS:
                     raise ServiceValidationError("Choose a valid sticker and earned state.")
                 child = children[child_id]
-                daily = self._day_record(child, day, profiles[child_id])
-                reward = daily["rewards"]["bedtime"]
+                daily = self._day_record(child, day, profiles[child_id], routine)
+                reward = daily["rewards"][routine]
                 reward["emoji"], reward["override"] = sticker, earned
-                self._recalculate(data, child, day, "bedtime", reward)
+                self._recalculate(data, child, day, routine, reward)
             elif action == "schedule":
                 schedule = values.get("schedule")
                 if not isinstance(schedule, dict):
@@ -539,6 +603,7 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 return {
                     "profiles": sorted(profiles.values(), key=lambda item: item["order"]),
                     "default_tasks": deepcopy(data["default_tasks"]),
+                    "default_morning_tasks": deepcopy(data["default_morning_tasks"]),
                     "schedule": {
                         key: data[key]
                         for key in ("dinner_time", "bedtime_time", "routine_switch_time")
@@ -563,16 +628,19 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             return child_id
 
     @staticmethod
-    def tasks_for_profile(data, child_id):
+    def tasks_for_profile(data, child_id, routine="bedtime"):
         profile = data["profiles"][child_id]
-        return deepcopy(profile.get("task_overrides", {}).get("bedtime") or data["default_tasks"])
+        return deepcopy(
+            profile.get("task_overrides", {}).get(routine)
+            or data[f"default_{routine}_tasks"]
+        )
 
-    async def _apply_task_list_change(self, data, child_id, task_list, effective_day, today):
+    async def _apply_task_list_change(self, data, child_id, task_list, effective_day, today, routine="bedtime"):
         if effective_day not in ("today", "tomorrow"):
             raise ServiceValidationError("Apply checklist changes today or tomorrow.")
         targets = [child_id] if child_id else [
             key for key in data["children"]
-            if data["profiles"][key].get("task_overrides", {}).get("bedtime") is None
+            if data["profiles"][key].get("task_overrides", {}).get(routine) is None
         ]
         apply_day = today if effective_day == "today" else (
             dt_util.parse_date(today) + timedelta(days=1)
@@ -583,12 +651,12 @@ class BedtimeCoordinator(DataUpdateCoordinator):
             for target in targets:
                 if target in data["children"]:
                     updates[:] = [item for item in updates if item["child_id"] != target]
-                    updates.append({"child_id": target, "tasks": deepcopy(task_list)})
+                    updates.append({"child_id": target, "tasks": deepcopy(task_list), "routine": routine})
             return
         for target in targets:
             if target not in data["children"]:
                 continue
-            install_task_snapshot(data, target, apply_day, task_list)
+            install_task_snapshot(data, target, apply_day, task_list, routine)
 
     @staticmethod
     def _validate_correction_day(day, today):

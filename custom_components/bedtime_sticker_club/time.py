@@ -10,7 +10,8 @@ from .const import DOMAIN, TITLE
 
 async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([
-        BedtimeTime(entry.runtime_data, name) for name in ("dinner_time", "bedtime_time")
+        BedtimeTime(entry.runtime_data, name)
+        for name in ("dinner_time", "bedtime_time", "routine_switch_time")
     ])
 
 
@@ -20,7 +21,12 @@ class BedtimeTime(CoordinatorEntity, TimeEntity):
         self.key = name
         self.entity_id = f"time.bedtime_{name}"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{name}"
-        self._attr_name = f"Bedtime {name.replace('_', ' ')}"
+        labels = {
+            "dinner_time": "Dinner time",
+            "bedtime_time": "Bedtime",
+            "routine_switch_time": "Routine switch time",
+        }
+        self._attr_name = labels[name]
         self._attr_icon = "mdi:clock-outline"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, coordinator.entry.entry_id)}, "name": TITLE,

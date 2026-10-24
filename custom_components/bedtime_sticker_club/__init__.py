@@ -16,7 +16,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DASHBOARD_URL, DOMAIN, STICKERS, TITLE
+from .const import DASHBOARD_URL, DOMAIN, ROUTINES, STICKERS, TITLE
 from .coordinator import BedtimeCoordinator
 
 PLATFORMS = [Platform.SENSOR, Platform.TIME]
@@ -109,6 +109,11 @@ async def async_setup_entry(hass, entry):
             registry.async_remove(entity_id)
         elif existing and existing.platform != DOMAIN:
             raise ConfigEntryError(f"The entity ID {entity_id} is already in use")
+        if key != "routine":
+            morning_entity_id = f"sensor.bedtime_{key}_morning"
+            morning_entry = registry.async_get(morning_entity_id)
+            if morning_entry and morning_entry.platform != DOMAIN:
+                raise ConfigEntryError(f"The entity ID {morning_entity_id} is already in use")
 
     coordinator.dashboard = register_dashboard(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -136,6 +141,7 @@ async def async_setup_entry(hass, entry):
         await coordinator.async_command(
             "task", values["child_id"], values["routine_date"],
             task=values["task"], completed=values["completed"],
+            routine=values.get("routine", "bedtime"),
         )
 
     async def choose_sticker(call):
@@ -143,6 +149,7 @@ async def async_setup_entry(hass, entry):
         await coordinator.async_command(
             "sticker", values["child_id"], values["routine_date"],
             sticker=values["sticker"],
+            routine=values.get("routine", "bedtime"),
         )
 
     async def set_avatar(call):
@@ -155,9 +162,11 @@ async def async_setup_entry(hass, entry):
     }
     hass.services.async_register(DOMAIN, "set_task", set_task, schema=vol.Schema({
         **common, vol.Required("task"): cv.string, vol.Required("completed"): bool,
+        vol.Optional("routine", default="bedtime"): vol.In(ROUTINES),
     }))
     hass.services.async_register(DOMAIN, "choose_sticker", choose_sticker, schema=vol.Schema({
         **common, vol.Required("sticker"): vol.In(STICKERS),
+        vol.Optional("routine", default="bedtime"): vol.In(ROUTINES),
     }))
     hass.services.async_register(DOMAIN, "set_avatar", set_avatar, schema=vol.Schema({
         vol.Required("child_id"): cv.string,
