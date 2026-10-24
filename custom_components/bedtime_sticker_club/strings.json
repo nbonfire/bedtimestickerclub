@@ -31,22 +31,24 @@
   },
   "services": {
     "set_task": {
-      "name": "Set a bedtime task",
-      "description": "Set an explicit completion value for the displayed routine date.",
+      "name": "Set a routine task",
+      "description": "Set an explicit completion value for the displayed routine and date.",
       "fields": {
         "child_id": {"name": "Child", "description": "The child's stable checklist identifier."},
         "routine_date": {"name": "Routine date", "description": "Date shown on the checklist."},
         "task": {"name": "Task", "description": "Which task to change."},
-        "completed": {"name": "Completed", "description": "Whether this task is complete."}
+        "completed": {"name": "Completed", "description": "Whether this task is complete."},
+        "routine": {"name": "Routine", "description": "Bedtime (default) or morning."}
       }
     },
     "choose_sticker": {
-      "name": "Choose a bedtime sticker",
-      "description": "Choose a sticker after completing all three tasks.",
+      "name": "Choose a routine sticker",
+      "description": "Choose a sticker after completing the selected routine's tasks.",
       "fields": {
         "child_id": {"name": "Child", "description": "The child's stable checklist identifier."},
         "routine_date": {"name": "Routine date", "description": "Date shown on the checklist."},
-        "sticker": {"name": "Sticker", "description": "The emoji to save for this day."}
+        "sticker": {"name": "Sticker", "description": "The emoji to save for this day."},
+        "routine": {"name": "Routine", "description": "Bedtime (default) or morning."}
       }
     },
     "set_avatar": {

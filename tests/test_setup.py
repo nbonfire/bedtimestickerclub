@@ -72,8 +72,10 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(frontend.async_panel_exists(hass, "bedtime-club"))
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_3").state, "7")
                 self.assertEqual(registry.async_get("sensor.bedtime_kid_3").platform, DOMAIN)
-                for entity in ("sensor.bedtime_routine", "sensor.bedtime_kid_1", "sensor.bedtime_kid_2", "sensor.bedtime_kid_3", "time.bedtime_dinner_time", "time.bedtime_bedtime_time"):
+                for entity in ("sensor.bedtime_routine", "sensor.bedtime_kid_1", "sensor.bedtime_kid_2", "sensor.bedtime_kid_3", "time.bedtime_dinner_time", "time.bedtime_bedtime_time", "time.bedtime_routine_switch_time"):
                     self.assertIsNotNone(hass.states.get(entity), entity)
+                self.assertIsNotNone(hass.states.get("sensor.bedtime_kid_1_morning"))
+                self.assertIsNotNone(hass.states.get("time.bedtime_routine_switch_time"))
                 day = hass.states.get("sensor.bedtime_routine").attributes["routine_date"]
                 for task in ("plate", "teeth", "outfit"):
                     await hass.services.async_call(DOMAIN, "set_task", {
@@ -84,6 +86,12 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                     "child_id": "kid_1", "routine_date": day, "sticker": "🚀",
                 }, blocking=True)
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_1").state, "1")
+                for task in ("get_dressed", "eat_breakfast", "brush_teeth", "pack_school_bag"):
+                    await hass.services.async_call(DOMAIN, "set_task", {
+                        "child_id": "kid_1", "routine_date": day,
+                        "routine": "morning", "task": task, "completed": True,
+                    }, blocking=True)
+                self.assertEqual(hass.states.get("sensor.bedtime_kid_1_morning").state, "1")
                 self.assertEqual(hass.states.get("sensor.bedtime_kid_1").attributes["stickers"][day]["emoji"], "🚀")
                 # Entity-targeted writes are closed; schedule changes go through
                 # the administrator-only Parent Controls websocket.

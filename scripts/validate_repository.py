@@ -35,7 +35,7 @@ def main():
     assert (COMPONENT / "brand/icon.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
     assert manifest["config_flow"] is True
-    for filename in ("config_flow.py", "coordinator.py", "sensor.py", "time.py", "services.yaml", "strings.json", "translations/en.json", "frontend/bedtime-sticker-club.js"):
+    for filename in ("avatar.py", "config_flow.py", "coordinator.py", "sensor.py", "time.py", "services.yaml", "strings.json", "translations/en.json", "frontend/bedtime-sticker-club.js"):
         assert (COMPONENT / filename).is_file(), filename
     strings = json.loads((COMPONENT / "strings.json").read_text())
     assert strings == json.loads((COMPONENT / "translations/en.json").read_text())
@@ -47,6 +47,13 @@ def main():
                for section in view.get("sections", [])
                for card in section.get("cards", [])) <= {"custom:bedtime-sticker-family"}
     assert "button_card_templates" not in dashboard
+    frontend = (COMPONENT / "frontend/bedtime-sticker-club.js").read_text()
+    assert 'type: "bedtime-sticker-calendar"' in frontend
+    assert 'type: "bedtime-sticker-family"' in frontend
+    assert 'type: "bedtime-sticker-child-card"' in frontend
+    assert 'calendarOpen ? "Hide" : "Show"' in frontend
+    assert "custom:bedtime-sticker-calendar" not in dashboard
+    assert "child_ids" in frontend
     assert [view["path"] for view in dashboard["views"]] == ["tonight", "parents"]
     assert dashboard["views"][0]["sections"][0]["cards"][0]["type"] == "custom:bedtime-sticker-family"
     assert "type: custom:bedtime-sticker-parent-controls" in (COMPONENT / "dashboard.yaml").read_text()

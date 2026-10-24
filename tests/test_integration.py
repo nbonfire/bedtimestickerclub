@@ -1,8 +1,10 @@
 """Native ledger tests using Home Assistant's real storage and config entries."""
 
 import asyncio
+from io import BytesIO
 from copy import deepcopy
 from datetime import datetime, time, timedelta
+import json
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -11,6 +13,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
+from aiohttp import web
+from PIL import Image
 from homeassistant.components import frontend
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.config_entries import ConfigEntry
@@ -25,7 +29,8 @@ from custom_components.bedtime_sticker_club import (
     register_dashboard,
     require_parent_admin,
 )
-from custom_components.bedtime_sticker_club.const import DOMAIN, TASKS
+from custom_components.bedtime_sticker_club.avatar import ChildAvatarView
+from custom_components.bedtime_sticker_club.const import DOMAIN, ROUTINES, TASKS
 from custom_components.bedtime_sticker_club.coordinator import BedtimeCoordinator, routine_date
 
 ZONE = ZoneInfo("America/New_York")
@@ -54,14 +59,18 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.hass.async_stop()
         self.directory.cleanup()
 
-    async def task(self, task, completed=True, child="kid_1", day=None):
+    async def task(self, task, completed=True, child="kid_1", day=None, routine="bedtime"):
         await self.coordinator.async_command(
-            "task", child, day or routine_date(), task=task, completed=completed,
+            "task", child, day or routine_date(), task=task, completed=completed, routine=routine,
         )
 
     async def finish(self, child="kid_1"):
         for task in TASKS:
             await self.task(task, child=child)
+
+    async def finish_routine(self, routine, child="kid_1"):
+        for task in self.coordinator.tasks_for(child, routine):
+            await self.task(task["id"], child=child, routine=routine)
 
     def child(self, child="kid_1"):
         return self.coordinator.data["children"][child]
@@ -130,6 +139,52 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.now = datetime(2026, 10, 20, 19, tzinfo=ZONE)
         await self.finish()
         self.assertEqual(self.child()["total"], 2)
+
+    async def test_morning_and_bedtime_rewards_are_separate(self):
+        self.assertEqual(tuple(ROUTINES), ("bedtime", "morning"))
+        self.now = datetime(2026, 10, 17, 7, tzinfo=ZONE)
+        self.assertEqual(self.coordinator.active_routine, "morning")
+        self.assertEqual(
+            [task["label"] for task in self.coordinator.tasks_for("kid_1", "morning")],
+            ["Get dressed", "Eat breakfast", "Brush teeth", "Pack the school bag"],
+        )
+        await self.finish_routine("morning")
+        self.assertEqual(self.child()["morning_total"], 1)
+        self.assertEqual(self.child()["total"], 0)
+        await self.coordinator.async_command(
+            "sticker", "kid_1", routine_date(), routine="morning", sticker="🌈",
+        )
+        self.assertEqual(self.child()["morning_stickers"][routine_date()]["emoji"], "🌈")
+        self.assertEqual(self.child()["stickers"], {})
+        await self.finish()
+        self.assertEqual(self.child()["total"], 1)
+        self.assertEqual(self.child()["morning_total"], 1)
+
+    async def test_parent_can_correct_a_morning_reward_without_changing_bedtime(self):
+        await self.coordinator.async_parent_control(
+            "set_reward", child_id="kid_1", routine="morning",
+            routine_date=routine_date(), earned=True, sticker="🌈",
+        )
+        self.assertEqual(self.child()["morning_total"], 1)
+        self.assertEqual(self.child()["total"], 0)
+        await self.coordinator.async_parent_control(
+            "correct_task", child_id="kid_1", routine="morning",
+            routine_date=routine_date(), task="get_dressed", completed=True,
+        )
+        self.assertEqual(self.child()["morning_total"], 0)
+        self.assertEqual(self.child()["total"], 0)
+
+    async def test_auto_switch_is_configurable_and_manual_actions_stay_daily(self):
+        self.now = datetime(2026, 10, 15, 11, 59, tzinfo=ZONE)
+        self.assertEqual(self.coordinator.active_routine, "morning")
+        old_day = routine_date()
+        self.now = self.now.replace(hour=12)
+        self.assertEqual(self.coordinator.active_routine, "bedtime")
+        self.assertEqual(routine_date(), old_day)
+        await self.coordinator.async_parent_control(
+            "schedule", schedule={"routine_switch_time": "08:00:00"},
+        )
+        self.assertEqual(self.coordinator.active_routine, "bedtime")
 
     async def test_month_year_and_dst_boundaries(self):
         await self.finish()
@@ -207,11 +262,12 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             },
         }
         upgraded = self.coordinator._upgrade(legacy)
-        self.assertEqual(upgraded["schema_version"], 2)
+        self.assertEqual(upgraded["schema_version"], 3)
         self.assertEqual(upgraded["children"]["kid_1"]["total"], 12)
         self.assertEqual(upgraded["children"]["kid_1"]["stickers"]["2026-10-15"]["emoji"], "🚀")
         self.assertEqual(upgraded["profiles"]["kid_1"]["name"], "Alex")
         self.assertEqual(upgraded["children"]["kid_1"]["morning_total"], 0)
+        self.assertEqual(upgraded["default_morning_tasks"], self.coordinator.data["default_morning_tasks"])
 
     async def test_registers_dashboard_and_preserves_existing_copy(self):
         self.hass.data[LOVELACE_DATA] = SimpleNamespace(dashboards={})
@@ -284,6 +340,37 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
                 earned=True, sticker="⭐",
             )
         self.assertEqual(self.child()["total"], 0)
+
+    async def test_authenticated_avatar_upload_is_normalized_and_persisted(self):
+        self.hass.data.setdefault(DOMAIN, {})[self.entry.entry_id] = self.coordinator
+        payload = BytesIO()
+        Image.new("RGB", (256, 128), "orange").save(payload, format="PNG")
+        request = SimpleNamespace(
+            app={"hass": self.hass},
+            content_type="image/png",
+            content_length=len(payload.getvalue()),
+            content=SimpleNamespace(read=AsyncMock(return_value=payload.getvalue())),
+        )
+        view = ChildAvatarView()
+        response = await view.post(request, "kid_1")
+        image_name = json.loads(response.body)["avatar_image"]
+        self.assertTrue(ChildAvatarView.requires_auth)
+        self.assertTrue(image_name.startswith("kid_1-"))
+        stored_path = Path(self.hass.config.path(DOMAIN, "avatars", image_name))
+        with Image.open(stored_path) as image:
+            self.assertEqual((image.format, image.size), ("WEBP", (512, 512)))
+        self.assertEqual(self.coordinator.data["profiles"]["kid_1"]["avatar_image"], image_name)
+
+        bad_request = SimpleNamespace(
+            app={"hass": self.hass},
+            content_type="image/png",
+            content_length=len(b"not an image"),
+            content=SimpleNamespace(read=AsyncMock(return_value=b"not an image")),
+        )
+        with self.assertRaises(web.HTTPBadRequest) as raised:
+            await view.post(bad_request, "kid_1")
+        self.assertEqual(getattr(raised.exception, "status", None), 400)
+        self.assertTrue(stored_path.is_file())
 
     async def test_refuses_to_overwrite_unrelated_panel(self):
         self.hass.data[LOVELACE_DATA] = SimpleNamespace(dashboards={})

@@ -1,8 +1,8 @@
 # Bedtime Sticker Club
 
-A shared-tablet Home Assistant dashboard for a family. Each child checks off
-clearing their plate, brushing their teeth, and choosing tomorrow's outfit.
-Completing all three earns a sticker on their monthly calendar.
+A shared-tablet Home Assistant dashboard for a family. Children complete
+independent morning and bedtime checklists, earn separate daily stickers, and
+see their routine-month stickers in child and shared family calendars.
 
 ![Tablet dashboard with independent progress and a chosen rocket sticker](docs/bedtime-tablet.png)
 
@@ -19,7 +19,7 @@ Requires **Home Assistant 2026.10 or newer** and HACS.
    `/bedtime-club/tonight`.
 
 No package includes or dashboard YAML configuration are needed. HACS manages the
-integration files; the setup flow creates profile sensors, two reminder-time
+integration files; the setup flow creates profile sensors, three reminder-time
 entities, the routine actions, and the dashboard. Only one instance is supported.
 
 ### Manual installation
@@ -44,17 +44,26 @@ retained, so adding it again restores the same progress.
 Edit children's names, task lists, ordering, and archive status in Parent
 Controls. Existing `kid_1`, `kid_2`, and `kid_3` IDs stay stable; newly added
 children receive stable IDs so renaming or archiving a child preserves stickers.
+Children can choose from an emoji picker or upload JPEG, PNG, or WebP avatars.
+Images up to 5 MiB are centered, cropped to 512 × 512, and stored in
+`/config/bedtime_sticker_club/avatars/`. Include that directory in backups.
+Children can choose a browsable emoji or upload JPEG, PNG, or WebP avatars.
+Uploads are limited to 5 MiB, cropped to 512 × 512, and stripped of metadata.
+Home Assistant stores them in `/config/bedtime_sticker_club/avatars/`; include
+that folder in backups.
 
 The gear at the top opens **Parent Controls**, also available at
 `/bedtime-club/parents`. Only Home Assistant administrators can change child
 profiles, tasks, schedules, or rewards. Children share the tablet dashboard but
 cannot open Parent Controls or change schedules through reminder-time entities.
-Dinner defaults to **6 pm** and bedtime to **7 pm**. Set dinner before bedtime,
-with both times at or after 4 am.
+Dinner defaults to **6 pm**, bedtime to **7 pm**, and the routine switch to noon.
+Parents can change any time in Parent Controls. The switch chooses what a card
+shows by default; a child can switch routines manually. Both task lists stay
+available all day.
 
-For a personal dashboard, add **Bedtime Sticker Club family dashboard** as a
-card in your own dashboard. Its card includes the family checklists; the bundled
-sidebar dashboard remains available for Parent Controls.
+Add **Bedtime Sticker Club child checklist** or **Bedtime Sticker Club calendar**
+from Home Assistant's **Add card** picker to use them on any dashboard. The
+bundled family dashboard remains available for Parent Controls.
 
 For a personal YAML dashboard, include the native family card:
 
@@ -62,14 +71,32 @@ For a personal YAML dashboard, include the native family card:
 type: custom:bedtime-sticker-family
 ```
 
-Add the card through Home Assistant's card picker after downloading the
-integration. Keep child profile IDs and entity IDs stable in any child-specific
-dashboard cards.
+Add a shared sticker calendar to another dashboard with
+`type: custom:bedtime-sticker-calendar`. Optionally set `child_ids` to a list
+of child profile IDs; without it, the calendar shows all active children.
+Each month cell lists the selected children's morning and bedtime stickers.
+
+Add an individual configurable checklist card with:
+
+```yaml
+type: custom:bedtime-sticker-child-card
+child_id: kid_1
+routine: auto
+size: inherit
+calendar: collapsible
+```
+
+The visual editors save these settings while preserving stable child profile IDs.
 
 ## How it behaves
 
 - Before dinner: preview tonight's routine. At dinner: highlight clearing plates.
   At bedtime: highlight unfinished teeth and outfit tasks. Tasks stay available.
+- The morning list appears every day. It starts with getting dressed, eating
+  breakfast, brushing teeth, and packing the school bag. Each child earns
+  separate morning and bedtime stickers and lifetime totals.
+- The automatic switch changes the selected routine at noon by default.
+  Children can switch their card manually; it returns to automatic at 4 am.
 - Finish all three: earn ⭐ and choose from ⭐ 🌈 🚀 🦄 🦖 🐱 🦋 ⚽. Changing the
   emoji never adds another completed day.
 - Undo a task: withdraw today's credit. Complete it again to restore the chosen
@@ -129,10 +156,13 @@ completion requests are idempotent, and a stale routine date is rejected.
 
 | Action | Required fields |
 | --- | --- |
-| `bedtime_sticker_club.set_task` | `child_id`, `task` (`plate`, `teeth`, `outfit`), `completed` (boolean), `routine_date` (`YYYY-MM-DD`) |
-| `bedtime_sticker_club.choose_sticker` | `child_id`, `routine_date`, `sticker` (one of the eight supported emojis) |
+| `bedtime_sticker_club.set_task` | `child_id`, `task`, `completed` (boolean), `routine_date` (`YYYY-MM-DD`), optional `routine` (`bedtime` default or `morning`) |
+| `bedtime_sticker_club.choose_sticker` | `child_id`, `routine_date`, `sticker` (one of the eight supported emojis), optional `routine` (`bedtime` default or `morning`) |
 
-Each child sensor stores the lifetime count in its state, plus `routine_date`,
+The bedtime child sensor IDs and actions remain compatible. Morning totals are
+available on `sensor.bedtime_<child_id>_morning`; omitting `routine` from an
+existing action continues to target bedtime. Each routine sensor stores its
+lifetime count in its state, plus `routine_date`,
 `month`, `tasks`, `completed`, `stickers`, and `child_name` attributes. Sticker
 records map dates to `{emoji, earned}`; withdrawn stickers retain their emoji.
 Use the actions above for automations. No external service is required.
