@@ -1,5 +1,6 @@
 """Set up Bedtime Sticker Club from Home Assistant's integration UI."""
 
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 
@@ -116,7 +117,17 @@ async def async_setup_entry(hass, entry):
     ))
 
     async def options_updated(hass, updated_entry):
-        coordinator.async_update_listeners()
+        data = deepcopy(coordinator.data)
+        changed = False
+        for child_id, profile in data["profiles"].items():
+            key = f"{child_id}_name"
+            if key in updated_entry.options and profile["name"] != updated_entry.options[key]:
+                profile["name"] = coordinator._valid_name(updated_entry.options[key])
+                changed = True
+        if changed:
+            await coordinator._commit(data)
+        else:
+            coordinator.async_update_listeners()
 
     entry.async_on_unload(entry.add_update_listener(options_updated))
 
