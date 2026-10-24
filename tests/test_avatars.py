@@ -2,10 +2,13 @@
 
 from io import BytesIO
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 
 from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from custom_components.bedtime_sticker_club.avatar import MAX_UPLOAD_BYTES, normalize_avatar
 
