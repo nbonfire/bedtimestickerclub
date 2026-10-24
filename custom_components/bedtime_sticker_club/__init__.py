@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.components.lovelace.dashboard import LovelaceYAML
 from homeassistant.const import Platform
-from homeassistant.exceptions import ConfigEntryError, Unauthorized
+from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
@@ -26,7 +26,7 @@ FRONTEND_URL = f"/{DOMAIN}/static/bedtime-sticker-club.js"
 def require_parent_admin(connection):
     """Require an authenticated Home Assistant administrator for parent actions."""
     if not connection.user.is_admin:
-        raise Unauthorized("Parent Controls are available to Home Assistant administrators.")
+        raise HomeAssistantError("Parent Controls are available to Home Assistant administrators.")
 
 
 async def async_handle_parent_action(hass, connection, entry_id, action, data):

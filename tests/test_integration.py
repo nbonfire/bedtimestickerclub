@@ -15,7 +15,7 @@ from homeassistant.components import frontend
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
-from homeassistant.exceptions import ConfigEntryError, ServiceValidationError, Unauthorized
+from homeassistant.exceptions import ConfigEntryError, HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import restore_state
 from homeassistant.util import dt as dt_util
 
@@ -70,11 +70,11 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         admin_connection = SimpleNamespace(user=SimpleNamespace(is_admin=True))
         child_connection = SimpleNamespace(user=SimpleNamespace(is_admin=False))
         require_parent_admin(admin_connection)
-        with self.assertRaises(Unauthorized):
+        with self.assertRaises(HomeAssistantError):
             require_parent_admin(child_connection)
         self.hass.data.setdefault(DOMAIN, {})[self.entry.entry_id] = self.coordinator
         request = {"action": "profile_create", "data": {"name": "Taylor"}}
-        with self.assertRaises(Unauthorized):
+        with self.assertRaises(HomeAssistantError):
             await async_handle_parent_action(
                 self.hass, child_connection, self.entry.entry_id,
                 request["action"], request["data"],

@@ -352,6 +352,9 @@ class BedtimeCoordinator(DataUpdateCoordinator):
                 if sticker not in STICKERS or not record.get("earned"):
                     raise ServiceValidationError("Finish all three tasks and choose a supported sticker.")
                 record["emoji"] = sticker
+                child["stickers"][day] = {
+                    "emoji": sticker, "earned": record["earned"],
+                }
             else:
                 raise ServiceValidationError("Invalid operation.")
             await self._commit(data)
