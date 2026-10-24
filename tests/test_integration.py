@@ -1,8 +1,10 @@
 """Native ledger tests using Home Assistant's real storage and config entries."""
 
 import asyncio
+from io import BytesIO
 from copy import deepcopy
 from datetime import datetime, time, timedelta
+import json
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -11,6 +13,9 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
+from aiohttp import web
+from aiohttp.test_utils import make_mocked_request
+from PIL import Image
 from homeassistant.components import frontend
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.config_entries import ConfigEntry
@@ -25,6 +30,7 @@ from custom_components.bedtime_sticker_club import (
     register_dashboard,
     require_parent_admin,
 )
+from custom_components.bedtime_sticker_club.avatar import ChildAvatarView
 from custom_components.bedtime_sticker_club.const import DOMAIN, ROUTINES, TASKS
 from custom_components.bedtime_sticker_club.coordinator import BedtimeCoordinator, routine_date
 
@@ -335,6 +341,35 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
                 earned=True, sticker="⭐",
             )
         self.assertEqual(self.child()["total"], 0)
+
+    async def test_authenticated_avatar_upload_is_normalized_and_persisted(self):
+        self.hass.data.setdefault(DOMAIN, {})[self.entry.entry_id] = self.coordinator
+        payload = BytesIO()
+        Image.new("RGB", (256, 128), "orange").save(payload, format="PNG")
+        request = make_mocked_request(
+            "POST", "/api/bedtime_sticker_club/avatars/kid_1",
+            headers={"Content-Type": "image/png"},
+            app={"hass": self.hass}, payload=payload.getvalue(),
+        )
+        view = ChildAvatarView()
+        response = await view.post(request, "kid_1")
+        image_name = json.loads(response.body)["avatar_image"]
+        self.assertTrue(ChildAvatarView.requires_auth)
+        self.assertTrue(image_name.startswith("kid_1-"))
+        stored_path = Path(self.hass.config.path(DOMAIN, "avatars", image_name))
+        with Image.open(stored_path) as image:
+            self.assertEqual((image.format, image.size), ("WEBP", (512, 512)))
+        self.assertEqual(self.coordinator.data["profiles"]["kid_1"]["avatar_image"], image_name)
+
+        bad_request = make_mocked_request(
+            "POST", "/api/bedtime_sticker_club/avatars/kid_1",
+            headers={"Content-Type": "image/png"},
+            app={"hass": self.hass}, payload=b"not an image",
+        )
+        with self.assertRaises(web.HTTPBadRequest) as raised:
+            await view.post(bad_request, "kid_1")
+        self.assertEqual(getattr(raised.exception, "status", None), 400)
+        self.assertTrue(stored_path.is_file())
 
     async def test_refuses_to_overwrite_unrelated_panel(self):
         self.hass.data[LOVELACE_DATA] = SimpleNamespace(dashboards={})
